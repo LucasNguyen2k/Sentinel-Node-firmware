@@ -1,0 +1,29 @@
+{
+  "document": "High-Level Firmware Requirements FW-01..FW-24 (document number and revision to be confirmed)",
+  "requirements": [
+    {"id": "FW-01", "title": "Boot & Initialization"},
+    {"id": "FW-02", "title": "Hardware Abstraction & Drivers", "note": "ultrasonic, power, tamper are HAL stubs (OP-01, OP-04, OP-08)"},
+    {"id": "FW-03", "title": "Sensor Data Acquisition"},
+    {"id": "FW-04", "title": "Sensor Preprocessing"},
+    {"id": "FW-05", "title": "Lightweight AI / Sensor Fusion"},
+    {"id": "FW-06", "title": "Event Detection & Management"},
+    {"id": "FW-07", "title": "Camera Event Control"},
+    {"id": "FW-08", "title": "Local Data Storage & Buffering"},
+    {"id": "FW-09", "title": "Wi-Fi HaLow Communication", "note": "tests cover the Wi-Fi link; HaLow radio pending (OP-02)"},
+    {"id": "FW-10", "title": "Edge AI Server Interface"},
+    {"id": "FW-11", "title": "Low-Power & Multi-Power-Mode Management", "note": "sleep modes pending (OP-05)"},
+    {"id": "FW-12", "title": "Power & Battery Monitoring", "note": "internal temperature only; battery/solar pending (OP-04)"},
+    {"id": "FW-13", "title": "Device Health Monitoring"},
+    {"id": "FW-14", "title": "Tamper & Movement Monitoring", "waiver": "hardware not fitted (OP-08); HAL stub reports null"},
+    {"id": "FW-15", "title": "Time & Synchronization"},
+    {"id": "FW-16", "title": "Cybersecurity", "note": "secure boot / signed images pending (OD-02)"},
+    {"id": "FW-17", "title": "Firmware Update / OTA", "note": "SDK image write needs a bench test on an OTA-mode board"},
+    {"id": "FW-18", "title": "Diagnostics & Logging"},
+    {"id": "FW-19", "title": "Manufacturing & Service Mode"},
+    {"id": "FW-20", "title": "Fault Recovery / Watchdog"},
+    {"id": "FW-21", "title": "Configuration Management"},
+    {"id": "FW-22", "title": "Firmware Verification & Testability"},
+    {"id": "FW-23", "title": "Data Compression & Encoding"},
+    {"id": "FW-24", "title": "Embedded Firmware Platform Architecture", "note": "node-hosted HTTP/RTSP still used for pictures/audio (OD-05)"}
+  ]
+}

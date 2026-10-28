@@ -1,0 +1,118 @@
+{
+  "fqbn": "realtek:AmebaPro2:Ameba_AMB82-MINI",
+  "variants": [
+    {
+      "name": "default",
+      "options": "",
+      "edits": [],
+      "expect": "pass",
+      "no_warnings": true,
+      "artifacts": [
+        "flash_ntz.bin"
+      ],
+      "reqs": "FW-01,FW-02,FW-24"
+    },
+    {
+      "name": "ota_mode",
+      "options": "07_OTAMode=Enable,06_LoadNNModelSource=sd",
+      "edits": [],
+      "expect": "pass",
+      "no_warnings": true,
+      "artifacts": [
+        "flash_ntz.bin",
+        "ota.bin"
+      ],
+      "reqs": "FW-17"
+    },
+    {
+      "name": "all_options",
+      "options": "",
+      "expect": "pass",
+      "no_warnings": true,
+      "reqs": "FW-07,FW-16,FW-22",
+      "edits": [
+        [
+          "sentinel_node.ino",
+          "//#define EVENT_VIDEO_CLIP",
+          "#define EVENT_VIDEO_CLIP"
+        ],
+        [
+          "sentinel_node.ino",
+          "//#define USE_TLS_SOCKET",
+          "#define USE_TLS_SOCKET"
+        ],
+        [
+          "sentinel_node.ino",
+          "//#define TESTING",
+          "#define TESTING"
+        ],
+        [
+          "sentinel_node.ino",
+          "//#define ENABLE_NET_OTA",
+          "#define ALLOW_REALTEK_NET_OTA\n#define ENABLE_NET_OTA"
+        ]
+      ]
+    },
+    {
+      "name": "net_ota_blocked",
+      "options": "",
+      "expect": "fail",
+      "expect_error": "ENABLE_NET_OTA: Realtek network OTA",
+      "reqs": "FW-16,FW-17",
+      "edits": [
+        [
+          "sentinel_node.ino",
+          "//#define ENABLE_NET_OTA",
+          "#define ENABLE_NET_OTA"
+        ]
+      ]
+    },
+    {
+      "name": "minimal",
+      "options": "",
+      "expect": "pass",
+      "no_warnings": true,
+      "reqs": "FW-02",
+      "edits": [
+        [
+          "sentinel_node.ino",
+          "\n#define ACOUSTIC_DETECTION",
+          "\n//#define ACOUSTIC_DETECTION"
+        ],
+        [
+          "sentinel_node.ino",
+          "\n#define DATA_STORE_FLASH",
+          "\n//#define DATA_STORE_FLASH"
+        ]
+      ]
+    },
+    {
+      "name": "ultrasonic_fitted",
+      "options": "",
+      "expect": "pass",
+      "no_warnings": true,
+      "reqs": "FW-02",
+      "edits": [
+        [
+          "ezsn_hal.h",
+          "//#define HAL_PIN_ULTRASONIC",
+          "#define HAL_PIN_ULTRASONIC"
+        ]
+      ]
+    },
+    {
+      "name": "sd_card",
+      "options": "",
+      "expect": "pass",
+      "no_warnings": true,
+      "reqs": "FW-08",
+      "edits": [
+        [
+          "sentinel_node.ino",
+          "//#define ENABLE_SD_STORAGE",
+          "#define ENABLE_SD_STORAGE"
+        ]
+      ]
+    }
+  ]
+}

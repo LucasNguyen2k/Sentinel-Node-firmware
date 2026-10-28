@@ -1,0 +1,3 @@
+LittleFS v2.4.1 (https://github.com/littlefs-project/littlefs, BSD-3-Clause, see LICENSE.md).
+Used only by the firmware host tests; the firmware links the identical version compiled into the
+Realtek Ameba Pro2 Arduino core (liboutsrc.a, component/file_system/littlefs/r2.41).
