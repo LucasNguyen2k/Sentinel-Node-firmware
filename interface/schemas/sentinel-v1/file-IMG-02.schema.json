@@ -1,0 +1,104 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://eyezense.local/schemas/sentinel-v1/file-IMG-02.schema.json",
+  "title": "Image event file ready (IMG-02)",
+  "type": "object",
+  "properties": {
+    "device_id": {
+      "type": "string",
+      "pattern": "^SN-[0-9A-F]{12}$"
+    },
+    "dataset_id": {
+      "const": "IMG-02"
+    },
+    "timestamp": {
+      "type": "string",
+      "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$"
+    },
+    "seq": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "boot_id": {
+      "type": "string",
+      "pattern": "^b\\d+$"
+    },
+    "schema_version": {
+      "type": "string",
+      "pattern": "^1\\.\\d+$"
+    },
+    "size": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "path": {
+      "type": "string",
+      "pattern": "^SN-[0-9A-F]{12}/[A-Z]+-\\d{2}/\\d{8}/\\d{8}_\\d{6}_\\d{6}\\.jpg$"
+    },
+    "content_type": {
+      "const": "image/jpeg"
+    },
+    "event_id": {
+      "anyOf": [
+        {
+          "type": "string",
+          "pattern": "^[EM]\\d+_\\d+$"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "part": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "trigger": {
+      "enum": [
+        "event",
+        "command"
+      ]
+    },
+    "command_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "width": {
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "height": {
+      "type": [
+        "integer",
+        "null"
+      ]
+    }
+  },
+  "required": [
+    "device_id",
+    "dataset_id",
+    "timestamp",
+    "seq",
+    "boot_id",
+    "schema_version",
+    "path",
+    "content_type",
+    "size",
+    "sha256",
+    "event_id",
+    "part",
+    "trigger",
+    "command_id",
+    "width",
+    "height"
+  ],
+  "additionalProperties": true
+}

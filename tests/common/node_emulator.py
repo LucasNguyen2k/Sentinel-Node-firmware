@@ -325,8 +325,8 @@ class NodeEmulator:
     def _uploader(self):
         while not self._stop.is_set():
             s = self.sock
-            if self.send_records and self.offline():
-                self.buffer.append(self.record() + "$")       # one record per cycle, as the firmware keeps
+            if self.send_records and (self.offline() or s is None):
+                self.buffer.append(self.record() + "$")       # one record per cycle, as the firmware keeps (SIM OFFLINE or no server)
             elif s and self.send_records:
                 try:
                     if self.buffer:                             # oldest first, then live data
@@ -348,6 +348,14 @@ class NodeEmulator:
                 self.heartbeat()
             except OSError:
                 pass
+            if self.sock is None and not self._stop.is_set():
+                # like the firmware (ensureSocket with backoff): register again if needed and reconnect,
+                # e.g. after the Edge Server restarted
+                try:
+                    self.register()
+                    self.connect_socket()
+                except OSError:
+                    pass
             self._stop.wait(self.hb_s)
 
     def _event_loop(self):

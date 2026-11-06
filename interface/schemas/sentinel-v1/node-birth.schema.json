@@ -1,0 +1,156 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://eyezense.local/schemas/sentinel-v1/node-birth.schema.json",
+  "title": "Node birth (NODE-01..04), retained",
+  "type": "object",
+  "properties": {
+    "device_id": {
+      "type": "string",
+      "pattern": "^SN-[0-9A-F]{12}$"
+    },
+    "dataset_id": {
+      "const": "NODE"
+    },
+    "timestamp": {
+      "type": "string",
+      "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$"
+    },
+    "seq": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "boot_id": {
+      "type": "string",
+      "pattern": "^b\\d+$"
+    },
+    "schema_version": {
+      "type": "string",
+      "pattern": "^1\\.\\d+$"
+    },
+    "board_name": {
+      "type": "string"
+    },
+    "serial_number": {
+      "type": "string"
+    },
+    "ip": {
+      "type": "string"
+    },
+    "firmware_version": {
+      "type": "string"
+    },
+    "mac_address": {
+      "type": "string",
+      "pattern": "^([0-9A-F]{2}:){5}[0-9A-F]{2}$"
+    },
+    "capabilities": {
+      "type": "object",
+      "required": [
+        "chemical",
+        "acoustic_1",
+        "acoustic_2_ultrasonic",
+        "image"
+      ],
+      "properties": {
+        "chemical": {
+          "type": "boolean"
+        },
+        "acoustic_1": {
+          "type": "boolean"
+        },
+        "acoustic_2_ultrasonic": {
+          "type": "boolean"
+        },
+        "image": {
+          "type": "boolean"
+        }
+      }
+    },
+    "chemical_adc": {
+      "type": "object",
+      "required": [
+        "converter",
+        "bits",
+        "vref_v",
+        "divider",
+        "resolution_mv"
+      ],
+      "properties": {
+        "converter": {
+          "type": "string"
+        },
+        "bits": {
+          "type": "integer",
+          "minimum": 8,
+          "maximum": 24
+        },
+        "vref_v": {
+          "type": "number"
+        },
+        "divider": {
+          "type": "number"
+        },
+        "circuit_supply_v": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "resolution_mv": {
+          "type": "number"
+        }
+      }
+    },
+    "config": {
+      "type": "object"
+    },
+    "storage": {
+      "type": "object",
+      "properties": {
+        "flash_mb": {
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "filesystem": {
+          "type": "boolean"
+        },
+        "offline_records_minutes": {
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "event_log_entries": {
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "keeps_event_pictures": {
+          "type": "boolean"
+        },
+        "keeps_sound_clips": {
+          "type": "boolean"
+        }
+      }
+    }
+  },
+  "required": [
+    "device_id",
+    "dataset_id",
+    "timestamp",
+    "seq",
+    "boot_id",
+    "schema_version",
+    "board_name",
+    "serial_number",
+    "firmware_version",
+    "mac_address",
+    "capabilities",
+    "chemical_adc",
+    "config"
+  ],
+  "additionalProperties": true
+}

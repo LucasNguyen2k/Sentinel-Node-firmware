@@ -1,0 +1,20 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://eyezense.local/schemas/sentinel-v1/cmd-stop_recording.schema.json",
+  "title": "Command stop_recording (node-gateway -> Edge HAL)",
+  "type": "object",
+  "properties": {
+    "command_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "target_command_id": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "command_id",
+    "target_command_id"
+  ],
+  "additionalProperties": true
+}

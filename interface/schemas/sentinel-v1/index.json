@@ -1,0 +1,81 @@
+{
+  "schema_version": "1.0",
+  "topics": [
+    {
+      "topic": "sentinel/v1/+/birth",
+      "schema": "node-birth"
+    },
+    {
+      "topic": "sentinel/v1/+/heartbeat",
+      "schema": "heartbeat"
+    },
+    {
+      "topic": "sentinel/v1/+/data/CHEM-01",
+      "schema": "data-CHEM-01"
+    },
+    {
+      "topic": "sentinel/v1/+/file/CHEM-02",
+      "schema": "file-CHEM-02"
+    },
+    {
+      "topic": "sentinel/v1/+/file/ACO-01",
+      "schema": "file-ACO-01"
+    },
+    {
+      "topic": "sentinel/v1/+/file/ACO-04",
+      "schema": "file-ACO-01"
+    },
+    {
+      "topic": "sentinel/v1/+/file/ACO-02",
+      "schema": "file-ACO-02"
+    },
+    {
+      "topic": "sentinel/v1/+/file/ACO-05",
+      "schema": "file-ACO-02"
+    },
+    {
+      "topic": "sentinel/v1/+/file/IMG-01",
+      "schema": "file-IMG-01"
+    },
+    {
+      "topic": "sentinel/v1/+/file/IMG-02",
+      "schema": "file-IMG-02"
+    },
+    {
+      "topic": "sentinel/v1/+/event/CHEM-03",
+      "schema": "event-CHEM-03"
+    },
+    {
+      "topic": "sentinel/v1/+/event/ACO-03",
+      "schema": "event-ACO-03"
+    },
+    {
+      "topic": "sentinel/v1/+/event/ACO-06",
+      "schema": "event-ACO-03"
+    },
+    {
+      "topic": "sentinel/v1/+/event/IMG-03",
+      "schema": "event-IMG-03"
+    },
+    {
+      "topic": "sentinel/v1/+/cmd/record_audio",
+      "schema": "cmd-record_audio"
+    },
+    {
+      "topic": "sentinel/v1/+/cmd/capture_image",
+      "schema": "cmd-capture_image"
+    },
+    {
+      "topic": "sentinel/v1/+/cmd/stop_recording",
+      "schema": "cmd-stop_recording"
+    },
+    {
+      "topic": "sentinel/v1/+/cmd/config_set",
+      "schema": "cmd-config_set"
+    },
+    {
+      "topic": "sentinel/v1/+/cmd_result",
+      "schema": "cmd-result"
+    }
+  ]
+}

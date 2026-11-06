@@ -1,0 +1,87 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://eyezense.local/schemas/sentinel-v1/file-CHEM-02.schema.json",
+  "title": "Chemical event data file ready (CHEM-02)",
+  "type": "object",
+  "properties": {
+    "device_id": {
+      "type": "string",
+      "pattern": "^SN-[0-9A-F]{12}$"
+    },
+    "dataset_id": {
+      "const": "CHEM-02"
+    },
+    "timestamp": {
+      "type": "string",
+      "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$"
+    },
+    "seq": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "boot_id": {
+      "type": "string",
+      "pattern": "^b\\d+$"
+    },
+    "schema_version": {
+      "type": "string",
+      "pattern": "^1\\.\\d+$"
+    },
+    "size": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "recorded_from": {
+      "type": "string",
+      "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$"
+    },
+    "recorded_to": {
+      "type": "string",
+      "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$"
+    },
+    "path": {
+      "type": "string",
+      "pattern": "^SN-[0-9A-F]{12}/[A-Z]+-\\d{2}/\\d{8}/\\d{8}_\\d{6}_\\d{6}\\.csv$"
+    },
+    "content_type": {
+      "const": "text/csv"
+    },
+    "rows": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "event_id": {
+      "type": "string",
+      "pattern": "^[EM]\\d+_\\d+$"
+    },
+    "part": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "late": {
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "device_id",
+    "dataset_id",
+    "timestamp",
+    "seq",
+    "boot_id",
+    "schema_version",
+    "path",
+    "content_type",
+    "size",
+    "sha256",
+    "rows",
+    "event_id",
+    "part",
+    "recorded_from",
+    "recorded_to"
+  ],
+  "additionalProperties": true
+}

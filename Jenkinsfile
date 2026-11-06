@@ -9,8 +9,10 @@ pipeline {
         booleanParam(name: 'RUN_HIL', defaultValue: false, description: 'Flash the bench node and run the hardware suite')
         booleanParam(name: 'RUN_MUTATION', defaultValue: false, description: 'Run the firmware mutation check')
         booleanParam(name: 'HIL_DESTRUCTIVE', defaultValue: true, description: 'Allow reboot / power-mode tests on the bench')
+        booleanParam(name: 'FLASH_NODE', defaultValue: true, description: 'Flash this build onto the bench node first (needs an x86-64 agent labelled sentinel-flash with the board on USB)')
         string(name: 'HIL_NODE_IP', defaultValue: '192.168.100.44', description: 'IP address of the bench node')
-        string(name: 'HIL_SERIAL_PORT', defaultValue: '/dev/ttyUSB0', description: 'USB serial port of the bench node')
+        string(name: 'FLASH_SERIAL_PORT', defaultValue: '/dev/ttyUSB0', description: 'USB serial port of the bench node on the sentinel-flash agent')
+        string(name: 'HIL_SERIAL_PORT', defaultValue: '', description: 'USB serial port of the bench node on the sentinel-hil agent, for the boot-log test; empty if the board is not attached there')
         string(name: 'SOAK_MINUTES', defaultValue: '5', description: 'Data-socket stability window on the bench')
     }
     triggers {
@@ -28,15 +30,17 @@ pipeline {
             agent {
                 dockerfile {
                     filename 'ci/docker/Dockerfile'
-                    label 'docker'
+                    label 'docker && x86_64'      // the Realtek toolchain exists for x86-64 hosts only
                     args '-v sentinel-arduino-cache:/opt/arduino-cache'
                 }
             }
             stages {
                 stage('Static checks') {
                     steps {
-                        sh 'python3 -m py_compile server/sentinel_node_api.py ci/*.py tests/common/*.py tests/fw_host/run_fw_host_tests.py tests/fw_host/framework/extract.py'
-                        sh 'python3 -m pyflakes server/sentinel_node_api.py ci tests/common tests/server tests/hil'
+                        sh 'python3 -m py_compile server/sentinel_node_api.py ci/*.py tests/common/*.py tests/fw_host/run_fw_host_tests.py tests/fw_host/framework/extract.py hw_interface/*.py interface/make_schemas.py'
+                        sh 'python3 -m pyflakes server/sentinel_node_api.py ci tests/common tests/server tests/hil tests/hal hw_interface interface'
+                        // the committed JSON Schemas must match their generator
+                        sh 'python3 interface/make_schemas.py && git diff --exit-code -- interface/schemas'
                         sh 'cppcheck --enable=warning,performance --error-exitcode=1 --inline-suppr --std=c++17 -I firmware/sentinel_node firmware/sentinel_node/ezsn_hal.cpp 2> build-cppcheck.txt || (cat build-cppcheck.txt; exit 1)'
                     }
                 }
@@ -52,10 +56,11 @@ pipeline {
                 }
                 // Timing-based tests run after the CPU-heavy compile, not alongside it: under full CPU load
                 // a server/emulator timing window can be missed and the result would be flaky.
-                stage('L3 server + L4 HIL dry run') {
+                stage('L3 server + HW Interface + L4 HIL dry run') {
                     steps {
                         sh 'python3 -m pytest tests/server -p no:cacheprovider --timeout 120 --junitxml build/server/junit.xml --req-json build/server/results.json'
                         sh 'python3 -m pytest tests/hil --target emulator --destructive -p no:cacheprovider --timeout 300 --junitxml build/hil/junit.xml --req-json build/hil/results.json'
+                        sh 'python3 -m pytest tests/hal -p no:cacheprovider --timeout 300 --junitxml build/hal/junit.xml'
                     }
                 }
                 stage('Mutation check') {
@@ -68,7 +73,7 @@ pipeline {
             }
             post {
                 always {
-                    junit allowEmptyResults: true, testResults: 'build/firmware/junit.xml, build/fw_host/junit/*.xml, build/server/junit.xml, build/hil/junit.xml, build/mutation/junit.xml'
+                    junit allowEmptyResults: true, testResults: 'build/firmware/junit.xml, build/fw_host/junit/*.xml, build/server/junit.xml, build/hil/junit.xml, build/hal/junit.xml, build/mutation/junit.xml'
                     archiveArtifacts allowEmptyArchive: true, artifacts: 'build/firmware/artifacts/**, build/firmware/*/compile.log, build/trace/**'
                     publishHTML(target: [reportName: 'Traceability', reportDir: 'build/trace', reportFiles: 'traceability.html',
                                          keepAll: true, alwaysLinkToLastBuild: true, allowMissing: true])
@@ -77,34 +82,54 @@ pipeline {
                 }
             }
         }
+        // Machines: the Edge Server and test runner (label sentinel-hil, for example the ARM64 Rubik Pi 3) and
+        // the x86-64 machine that has the bench board on USB (label sentinel-flash). One machine may carry both.
         stage('L4 hardware-in-the-loop') {
             when {
                 beforeAgent true
                 anyOf { triggeredBy 'TimerTrigger'; expression { params.RUN_HIL }; buildingTag() }
             }
-            agent { label 'sentinel-hil' }
             options { lock(resource: 'sentinel-node-bench') }
-            steps {
-                unstash 'firmware'
-                unstash 'results'
-                withCredentials([string(credentialsId: 'sentinel-api-key', variable: 'AMB82_API_KEY')]) {
-                    sh 'ci/hil/deploy_edge_server.sh'
-                    sh "ci/hil/flash_node.sh build/firmware/default/build ${params.HIL_SERIAL_PORT}"
-                    sh """python3 -m pytest tests/hil --target hardware -p no:cacheprovider --timeout 1800 \
-                          --api-url http://127.0.0.1:8080/api/v1 --node-ip ${params.HIL_NODE_IP} \
-                          --fw-version \$(grep -oP 'FW_VERSION\\s+"\\K[^"]+' firmware/sentinel_node/sentinel_node.ino) \
-                          --serial-port ${params.HIL_SERIAL_PORT} --soak-minutes ${params.SOAK_MINUTES} \
-                          ${params.HIL_DESTRUCTIVE ? '--destructive' : ''} \
-                          --junitxml build/hil_hw/junit.xml --req-json build/hil_hw/results.json"""
+            stages {
+                stage('Deploy Edge Server') {
+                    agent { label 'sentinel-hil' }
+                    steps {
+                        withCredentials([string(credentialsId: 'sentinel-api-key', variable: 'AMB82_API_KEY')]) {
+                            sh '. /etc/profile.d/sentinel-ci.sh; ci/hil/deploy_edge_server.sh'
+                        }
+                    }
                 }
-                sh 'python3 ci/trace_report.py'
-            }
-            post {
-                always {
-                    junit allowEmptyResults: true, testResults: 'build/hil_hw/junit.xml'
-                    archiveArtifacts allowEmptyArchive: true, artifacts: 'build/trace/**, build/hil_hw/**'
-                    publishHTML(target: [reportName: 'Traceability (with hardware)', reportDir: 'build/trace',
-                                         reportFiles: 'traceability.html', keepAll: true, allowMissing: true])
+                stage('Flash bench node') {
+                    when { beforeAgent true; expression { params.FLASH_NODE } }
+                    agent { label 'sentinel-flash && x86_64' }
+                    steps {
+                        unstash 'firmware'
+                        sh "ci/hil/flash_node.sh build/firmware/default/build ${params.FLASH_SERIAL_PORT}"
+                    }
+                }
+                stage('Hardware suite') {
+                    agent { label 'sentinel-hil' }
+                    steps {
+                        unstash 'results'
+                        withCredentials([string(credentialsId: 'sentinel-api-key', variable: 'AMB82_API_KEY')]) {
+                            sh """. /etc/profile.d/sentinel-ci.sh
+                                  python3 -m pytest tests/hil --target hardware -p no:cacheprovider --timeout 1800 \\
+                                  --api-url http://127.0.0.1:8080/api/v1 --node-ip ${params.HIL_NODE_IP} \\
+                                  --fw-version \$(grep -oP 'FW_VERSION\\s+"\\K[^"]+' firmware/sentinel_node/sentinel_node.ino) \\
+                                  ${params.HIL_SERIAL_PORT?.trim() ? '--serial-port ' + params.HIL_SERIAL_PORT.trim() : ''} \\
+                                  --soak-minutes ${params.SOAK_MINUTES} ${params.HIL_DESTRUCTIVE ? '--destructive' : ''} \\
+                                  --junitxml build/hil_hw/junit.xml --req-json build/hil_hw/results.json"""
+                        }
+                        sh '. /etc/profile.d/sentinel-ci.sh; python3 ci/trace_report.py'
+                    }
+                    post {
+                        always {
+                            junit allowEmptyResults: true, testResults: 'build/hil_hw/junit.xml'
+                            archiveArtifacts allowEmptyArchive: true, artifacts: 'build/trace/**, build/hil_hw/**'
+                            publishHTML(target: [reportName: 'Traceability (with hardware)', reportDir: 'build/trace',
+                                                 reportFiles: 'traceability.html', keepAll: true, allowMissing: true])
+                        }
+                    }
                 }
             }
         }

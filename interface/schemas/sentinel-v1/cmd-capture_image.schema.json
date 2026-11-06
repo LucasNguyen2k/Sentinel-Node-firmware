@@ -1,0 +1,32 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://eyezense.local/schemas/sentinel-v1/cmd-capture_image.schema.json",
+  "title": "Command capture_image (node-gateway -> Edge HAL)",
+  "type": "object",
+  "properties": {
+    "command_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "count": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 10
+    },
+    "event_id": {
+      "anyOf": [
+        {
+          "type": "string",
+          "pattern": "^[EM]\\d+_\\d+$"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    }
+  },
+  "required": [
+    "command_id"
+  ],
+  "additionalProperties": true
+}

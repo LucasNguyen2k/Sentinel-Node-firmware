@@ -1,0 +1,124 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://eyezense.local/schemas/sentinel-v1/data-CHEM-01.schema.json",
+  "title": "Chemical baseline reading (CHEM-01)",
+  "type": "object",
+  "properties": {
+    "device_id": {
+      "type": "string",
+      "pattern": "^SN-[0-9A-F]{12}$"
+    },
+    "dataset_id": {
+      "const": "CHEM-01"
+    },
+    "timestamp": {
+      "type": "string",
+      "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$"
+    },
+    "seq": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "boot_id": {
+      "type": "string",
+      "pattern": "^b\\d+$"
+    },
+    "schema_version": {
+      "type": "string",
+      "pattern": "^1\\.\\d+$"
+    },
+    "sensor_values": {
+      "type": "string",
+      "pattern": "^\\d{13},(-?\\d+(\\.\\d+)?)?,(-?\\d+(\\.\\d+)?)?,(-?\\d+(\\.\\d+)?)?$"
+    },
+    "fields": {
+      "type": "object",
+      "required": [
+        "time_ms",
+        "temp_c",
+        "rh_pct",
+        "mos_mv"
+      ],
+      "properties": {
+        "time_ms": {
+          "type": "integer"
+        },
+        "temp_c": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "rh_pct": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "mos_mv": {
+          "type": [
+            "number",
+            "null"
+          ]
+        }
+      }
+    },
+    "quality": {
+      "type": "object",
+      "required": [
+        "warmed_up",
+        "calibrated",
+        "sensor_ok",
+        "temp_rh_ok",
+        "time_synced",
+        "maintenance",
+        "simulated",
+        "mos_resolution_mv"
+      ],
+      "properties": {
+        "warmed_up": {
+          "type": "boolean"
+        },
+        "calibrated": {
+          "type": "boolean"
+        },
+        "sensor_ok": {
+          "type": "boolean"
+        },
+        "temp_rh_ok": {
+          "type": "boolean"
+        },
+        "time_synced": {
+          "type": "boolean"
+        },
+        "maintenance": {
+          "type": "boolean"
+        },
+        "simulated": {
+          "type": "boolean"
+        },
+        "mos_resolution_mv": {
+          "type": "number"
+        }
+      }
+    },
+    "gas_ppm": {
+      "type": [
+        "number",
+        "null"
+      ]
+    }
+  },
+  "required": [
+    "device_id",
+    "dataset_id",
+    "timestamp",
+    "seq",
+    "boot_id",
+    "schema_version",
+    "sensor_values",
+    "fields",
+    "quality"
+  ],
+  "additionalProperties": true
+}

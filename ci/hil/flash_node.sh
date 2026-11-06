@@ -7,6 +7,11 @@ BUILD_DIR=$1
 PORT=$2
 FQBN="realtek:AmebaPro2:Ameba_AMB82-MINI:01_AutoUploadMode=Enable"
 source /etc/profile.d/sentinel-ci.sh 2>/dev/null || true
+if [ "$(uname -m)" != "x86_64" ]; then
+  echo "flash_node.sh: this machine is $(uname -m); the Realtek upload tool runs on x86-64 hosts only." >&2
+  echo "Flash from an x86-64 agent labelled sentinel-flash that has the bench board on USB." >&2
+  exit 1
+fi
 for attempt in 1 2 3; do
   if arduino-cli upload -b "$FQBN" -p "$PORT" --input-dir "$BUILD_DIR" firmware/sentinel_node; then
     echo "flashed on attempt $attempt"; exit 0

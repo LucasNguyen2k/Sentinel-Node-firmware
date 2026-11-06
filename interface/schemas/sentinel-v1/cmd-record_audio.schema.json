@@ -1,0 +1,33 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://eyezense.local/schemas/sentinel-v1/cmd-record_audio.schema.json",
+  "title": "Command record_audio (node-gateway -> Edge HAL)",
+  "type": "object",
+  "properties": {
+    "command_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "duration_s": {
+      "type": "number",
+      "exclusiveMinimum": 0,
+      "maximum": 600
+    },
+    "event_id": {
+      "anyOf": [
+        {
+          "type": "string",
+          "pattern": "^[EM]\\d+_\\d+$"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    }
+  },
+  "required": [
+    "command_id",
+    "duration_s"
+  ],
+  "additionalProperties": true
+}

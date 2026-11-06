@@ -1,0 +1,116 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://eyezense.local/schemas/sentinel-v1/event-CHEM-03.schema.json",
+  "title": "Node-triggered event notification (CHEM-03)",
+  "type": "object",
+  "properties": {
+    "device_id": {
+      "type": "string",
+      "pattern": "^SN-[0-9A-F]{12}$"
+    },
+    "dataset_id": {
+      "const": "CHEM-03"
+    },
+    "timestamp": {
+      "type": "string",
+      "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$"
+    },
+    "seq": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "boot_id": {
+      "type": "string",
+      "pattern": "^b\\d+$"
+    },
+    "schema_version": {
+      "type": "string",
+      "pattern": "^1\\.\\d+$"
+    },
+    "event_id": {
+      "type": "string",
+      "pattern": "^[EM]\\d+_\\d+$"
+    },
+    "notification": {
+      "enum": [
+        "start",
+        "record",
+        "end"
+      ]
+    },
+    "state": {
+      "enum": [
+        "SUSPECT",
+        "CONFIRMED",
+        "NORMAL"
+      ]
+    },
+    "triggered_by": {
+      "type": "object",
+      "required": [
+        "chemical",
+        "acoustic_1",
+        "acoustic_2_ultrasonic"
+      ],
+      "properties": {
+        "chemical": {
+          "type": "boolean"
+        },
+        "acoustic_1": {
+          "type": "boolean"
+        },
+        "acoustic_2_ultrasonic": {
+          "type": "boolean"
+        }
+      }
+    },
+    "mos_mv": {
+      "type": [
+        "number",
+        "null"
+      ]
+    },
+    "maintenance": {
+      "type": "boolean"
+    },
+    "parts_total": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "late": {
+      "type": "boolean"
+    },
+    "source": {
+      "enum": [
+        "live",
+        "node_event_log"
+      ]
+    }
+  },
+  "required": [
+    "device_id",
+    "dataset_id",
+    "timestamp",
+    "seq",
+    "boot_id",
+    "schema_version",
+    "event_id",
+    "notification",
+    "state",
+    "triggered_by",
+    "maintenance"
+  ],
+  "additionalProperties": true,
+  "if": {
+    "properties": {
+      "notification": {
+        "const": "end"
+      }
+    }
+  },
+  "then": {
+    "required": [
+      "parts_total"
+    ]
+  }
+}

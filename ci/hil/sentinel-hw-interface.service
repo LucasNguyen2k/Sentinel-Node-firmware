@@ -1,0 +1,15 @@
+[Unit]
+Description=Sentinel HW Interface (Edge HAL: data area + MQTT sentinel/v1)
+After=network-online.target sentinel-edge.service mosquitto.service
+Wants=sentinel-edge.service
+
+[Service]
+User=sentinel
+EnvironmentFile=/etc/sentinel-hw-interface.env
+WorkingDirectory=/opt/sentinel-edge
+ExecStart=/opt/sentinel-venv/bin/python -m hw_interface
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
