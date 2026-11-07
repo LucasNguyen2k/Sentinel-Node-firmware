@@ -43,10 +43,12 @@ class MediaFeeder(threading.Thread):
     """Plays the SN Device Driver's recorder and picture fetch: writes finished audio segments and periodic
     pictures into the driver's folder of the node, named by local start time as the driver does."""
 
-    def __init__(self, folder):
+    def __init__(self, folder, keep_audio=None):
         super().__init__(daemon=True)
         self.folder = folder
         self.stop = threading.Event()
+        # like the driver's MAX_AUDIO_SEGMENTS: keep only the newest N finished segments
+        self.keep_audio = keep_audio if keep_audio is not None else int(os.getenv("HAL_AUDIO_KEEP", "3"))
 
     @staticmethod
     def stamp(t):
@@ -70,6 +72,9 @@ class MediaFeeder(threading.Thread):
                     w.writeframes(frames)
                 os.replace(p + ".tmp", p)
                 seg_start += SEG_S
+                segs = sorted(f for f in os.listdir(os.path.join(self.folder, "audio")) if f.endswith(".wav"))
+                for old in segs[:-self.keep_audio]:
+                    os.remove(os.path.join(self.folder, "audio", old))
             if now - last_img >= 1.0:
                 last_img = now
                 with open(os.path.join(self.folder, "images", self.stamp(now) + ".jpg"), "wb") as f:

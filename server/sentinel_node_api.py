@@ -52,7 +52,7 @@ from urllib.parse import parse_qs, urlparse
 
 import requests
 import uvicorn
-from fastapi import APIRouter, Depends, FastAPI, Header, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, FastAPI, Header, HTTPException, Query, Request, Response
 from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
@@ -80,10 +80,19 @@ KEEPALIVE_IDLE, KEEPALIVE_INTERVAL, KEEPALIVE_COUNT = 30, 10, 3
 ONLINE_WINDOW = int(os.getenv("AMB82_ONLINE_WINDOW", "30"))
 AUDIO_RECORDER = os.getenv("AMB82_AUDIO_RECORDER", "auto")   # auto | gst | ffmpeg
 SENSOR_BUFFER_SIZE = 10_000    # sensor records kept in memory for the API
-MAX_IMAGES = 1440              # retention (1 day at 60 s)
-MAX_AUDIO_SEGMENTS = 1440      # retention (1 day at 60 s)
-MAX_EVENT_IMAGES = int(os.getenv("AMB82_MAX_EVENT_IMAGES", "5000"))   # event pictures kept longer
-MAX_EVENT_AUDIO = int(os.getenv("AMB82_MAX_EVENT_AUDIO", "2000"))     # event sound clips (firmware >= 1.6.0)
+# Storage of the SN Device Driver is kept as small as the HW Interface allows (it delivers the long-term data):
+# it reads the newest periodic picture (IMG-01), cuts audio from the newest segments (ACO-01/02), and downloads
+# event pictures and clips as soon as they are announced.
+MAX_IMAGES = max(1, int(os.getenv("AMB82_MAX_IMAGES", "2")))
+# Keep only the newest few audio segments: the HW Interface cuts ACO-01 (5 s) and ACO-02 (30 s parts) from them,
+# and a 30 s part can span two segments and is cut only after the second one is finished. 3 segments (~3 min,
+# ~6 MB per node) is the safe minimum; 1 would lose most event audio parts.
+MAX_AUDIO_SEGMENTS = max(1, int(os.getenv("AMB82_MAX_AUDIO_SEGMENTS", "3")))
+MAX_EVENT_IMAGES = max(1, int(os.getenv("AMB82_MAX_EVENT_IMAGES", "100")))   # buffer for a briefly stopped HW Interface
+MAX_EVENT_AUDIO = max(1, int(os.getenv("AMB82_MAX_EVENT_AUDIO", "100")))     # event sound clips (firmware >= 1.6.0)
+SENSOR_CSV_HOURS = float(os.getenv("AMB82_SENSOR_CSV_HOURS", "1"))   # sensor-data.csv rotates after this; 0 = not written
+EVENTS_LOG_MAX_MB = float(os.getenv("AMB82_EVENTS_LOG_MAX_MB", "1"))  # events.jsonl rotates at this size
+LIST_LIMIT_MAX = 5000            # upper bound of the list endpoints' limit (independent of the retention)
 ECO_CAPTURE_GAP_TIME = int(os.getenv("AMB82_ECO_CAPTURE_GAP", "600"))  # periodic picture gap when node is in ECO mode
 NODE_TOKEN = os.getenv("AMB82_NODE_TOKEN")      # node API token (firmware "token"); needed if node secure_all=1
 EVENT_WEBHOOK = os.getenv("AMB82_EVENT_WEBHOOK")  # optional URL: every event is POSTed here as JSON
@@ -238,7 +247,13 @@ class EventBus:
                   **data}
             self._events.append(ev)
         line = json.dumps(ev)
-        with open(dev.dir / "events.jsonl", "a", encoding="utf-8") as f:
+        log_path = dev.dir / "events.jsonl"
+        try:
+            if log_path.stat().st_size > EVENTS_LOG_MAX_MB * 1e6:
+                os.replace(log_path, log_path.with_name("events.jsonl.1"))      # keep one previous file
+        except FileNotFoundError:
+            pass
+        with open(log_path, "a", encoding="utf-8") as f:
             f.write(line + "\n")
         lvl = logging.WARNING if data.get("state") == "CONFIRMED" or etype == "node_offline" else logging.INFO
         log.log(lvl, "EVENT %s %s %s", dev.name, etype, {k: v for k, v in data.items() if k != "images"})
@@ -295,6 +310,7 @@ class Device:
         self.registered_at = datetime.now()
         self.dir = DATA_DIR / f"{name}_{ip}"
         self.csv_path = self.dir / "sensor-data.csv"
+        self._csv_started = time.time()
         for kind in MEDIA:
             self._media_dir(kind).mkdir(parents=True, exist_ok=True)
         self.socket_port = SOCKET_BASE_PORT + int(ip.split(".")[3])
@@ -534,6 +550,13 @@ class Device:
                     rec["fields"] = fields
                 self._records.append(rec)
                 lines.append(f"{rec['time']},{rec['seq']},{text}\n")
+        if SENSOR_CSV_HOURS <= 0:
+            return
+        now = time.time()
+        if now - self._csv_started > SENSOR_CSV_HOURS * 3600:
+            if self.csv_path.exists():
+                os.replace(self.csv_path, self.csv_path.with_name("sensor-data.csv.1"))   # keep one previous period
+            self._csv_started = now
         with open(self.csv_path, "a", encoding="utf-8") as f:
             f.writelines(lines)
 
@@ -1178,10 +1201,17 @@ def sensor_history(device_id: str,
 
 @api.get("/devices/{device_id}/sensor.csv", tags=["sensor"])
 def sensor_csv(device_id: str):
+    """The current period of sensor-data.csv (AMB82_SENSOR_CSV_HOURS), read in one go: a snapshot that a rotation
+    during the download cannot cut short."""
     dev = _device(device_id)
-    if not dev.csv_path.exists():
+    if SENSOR_CSV_HOURS <= 0:
+        raise HTTPException(status_code=404, detail="sensor CSV is switched off (AMB82_SENSOR_CSV_HOURS=0)")
+    try:
+        data = dev.csv_path.read_bytes()
+    except FileNotFoundError:
         raise HTTPException(status_code=404, detail="No sensor data yet")
-    return FileResponse(dev.csv_path, media_type="text/csv", filename=f"{dev.name}_{dev.ip}_sensor.csv")
+    return Response(content=data, media_type="text/csv",
+                    headers={"Content-Disposition": f'attachment; filename="{dev.name}_{dev.ip}_sensor.csv"'})
 
 
 @api.get("/devices/{device_id}/sensor/stream", tags=["sensor"])
@@ -1204,7 +1234,7 @@ async def sensor_stream(device_id: str, request: Request,
 
 
 @api.get("/devices/{device_id}/images", tags=["images"])
-def list_images(device_id: str, limit: int = Query(50, ge=1, le=MAX_IMAGES)):
+def list_images(device_id: str, limit: int = Query(50, ge=1, le=LIST_LIMIT_MAX)):
     return _file_list(_device(device_id), "image", limit)
 
 
@@ -1231,7 +1261,7 @@ def get_image(device_id: str, filename: str):
 
 
 @api.get("/devices/{device_id}/event-images", tags=["events"])
-def list_event_images(device_id: str, limit: int = Query(50, ge=1, le=MAX_EVENT_IMAGES),
+def list_event_images(device_id: str, limit: int = Query(50, ge=1, le=LIST_LIMIT_MAX),
                       event_id: Optional[str] = None):
     items = _file_list(_device(device_id), "event_image", MAX_EVENT_IMAGES if event_id else limit)
     if event_id:
@@ -1253,7 +1283,7 @@ def get_event_image(device_id: str, filename: str):
 
 
 @api.get("/devices/{device_id}/event-audio", tags=["events"])
-def list_event_audio(device_id: str, limit: int = Query(50, ge=1, le=MAX_EVENT_AUDIO),
+def list_event_audio(device_id: str, limit: int = Query(50, ge=1, le=LIST_LIMIT_MAX),
                      event_id: Optional[str] = None):
     """Sound clips the node recorded during leak events while the server was unreachable."""
     items = _file_list(_device(device_id), "event_audio", MAX_EVENT_AUDIO if event_id else limit)
@@ -1276,7 +1306,7 @@ def get_event_audio(device_id: str, filename: str):
 
 
 @api.get("/devices/{device_id}/audio", tags=["audio"])
-def list_audio(device_id: str, limit: int = Query(50, ge=1, le=MAX_AUDIO_SEGMENTS)):
+def list_audio(device_id: str, limit: int = Query(50, ge=1, le=LIST_LIMIT_MAX)):
     return _file_list(_device(device_id), "audio", limit)
 
 

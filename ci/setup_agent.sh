@@ -125,6 +125,15 @@ if [ "$ROLE" = edge ]; then
     fi
   fi
   run install -m 0644 "$REPO/ci/hil/sentinel-hw-interface.service" /etc/systemd/system/sentinel-hw-interface.service
+  # sentinel-status: one-screen health check (Wi-Fi, services, settings, nodes, data, disk, clock)
+  run install -d -m 0755 /opt/sentinel-edge/tools
+  run install -m 0755 "$REPO/tools/sentinel_status.py" /opt/sentinel-edge/tools/sentinel_status.py
+  if [ "$DRY_RUN" = 1 ]; then
+    echo "  would install /usr/local/bin/sentinel-status"
+  else
+    printf '#!/bin/sh\nexec /opt/sentinel-venv/bin/python /opt/sentinel-edge/tools/sentinel_status.py "$@"\n' > /usr/local/bin/sentinel-status
+    chmod 0755 /usr/local/bin/sentinel-status
+  fi
   run systemctl daemon-reload
   run systemctl enable sentinel-edge sentinel-hw-interface
   if id "$JENKINS_USER" >/dev/null 2>&1; then
