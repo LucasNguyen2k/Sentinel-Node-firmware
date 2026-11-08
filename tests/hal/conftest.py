@@ -49,6 +49,7 @@ class MediaFeeder(threading.Thread):
         self.stop = threading.Event()
         # like the driver's MAX_AUDIO_SEGMENTS: keep only the newest N finished segments
         self.keep_audio = keep_audio if keep_audio is not None else int(os.getenv("HAL_AUDIO_KEEP", "3"))
+        self.gap_s = float(os.getenv("HAL_AUDIO_GAP", "0"))     # missing audio between segments, like a restart
 
     @staticmethod
     def stamp(t):
@@ -71,7 +72,7 @@ class MediaFeeder(threading.Thread):
                     w.setframerate(16000)
                     w.writeframes(frames)
                 os.replace(p + ".tmp", p)
-                seg_start += SEG_S
+                seg_start += SEG_S + self.gap_s
                 segs = sorted(f for f in os.listdir(os.path.join(self.folder, "audio")) if f.endswith(".wav"))
                 for old in segs[:-self.keep_audio]:
                     os.remove(os.path.join(self.folder, "audio", old))

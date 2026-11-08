@@ -99,14 +99,14 @@ SCHEMAS = dict([
         ["path", "content_type", "size", "sha256", "rows", "event_id", "part", "recorded_from", "recorded_to"]),
     schema("file-ACO-01", "Acoustic baseline file ready (ACO-01, ACO-04)", ["ACO-01", "ACO-04"], dict(FILE_COMMON, **WINDOW, **{
         "path": path_for("wav"), "content_type": {"const": "audio/wav"},
-        "time_accuracy_ms": {"type": "integer", "minimum": 0}}),
+        "time_accuracy_ms": {"type": "integer", "minimum": 0}, "gaps_ms": {"type": "integer", "minimum": 1}}),
         ["path", "content_type", "size", "sha256", "recorded_from", "recorded_to", "time_accuracy_ms"],
         {"not": {"anyOf": [{"required": ["event_id"]}, {"required": ["part"]}]}}),
     schema("file-ACO-02", "Acoustic event file ready (ACO-02, ACO-05)", ["ACO-02", "ACO-05"], dict(FILE_COMMON, **WINDOW, **{
         "path": path_for("wav"), "content_type": {"const": "audio/wav"},
         "event_id": EVENT_ID_OR_NULL, "part": {"type": "integer", "minimum": 1}, "trigger": TRIGGER,
         "command_id": {"type": ["string", "null"]}, "time_accuracy_ms": {"type": "integer", "minimum": 0},
-        "recorded_by": {"enum": ["edge", "node"]}}),
+        "recorded_by": {"enum": ["edge", "node"]}, "gaps_ms": {"type": "integer", "minimum": 1}}),
         ["path", "content_type", "size", "sha256", "event_id", "part", "trigger", "command_id",
          "recorded_from", "recorded_to", "time_accuracy_ms", "recorded_by"]),
     schema("file-IMG-01", "Image baseline file ready (IMG-01)", "IMG-01", dict(FILE_COMMON, **{

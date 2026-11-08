@@ -32,6 +32,7 @@ class Settings:
     min_event_images: int = field(default_factory=lambda: int(os.getenv("HWI_MIN_EVENT_IMAGES", "2")))
     aco_time_accuracy_ms: int = field(default_factory=lambda: int(os.getenv("HWI_ACO_TIME_ACCURACY_MS", "1000")))
     audio_giveup_s: float = field(default_factory=lambda: _f("HWI_AUDIO_GIVEUP_S", 150))
+    audio_max_gap_s: float = field(default_factory=lambda: _f("HWI_AUDIO_MAX_GAP_S", 3.0))   # bridged with silence
     capture_timeout_s: float = field(default_factory=lambda: _f("HWI_CAPTURE_TIMEOUT_S", 30))
     retention_s: float = field(default_factory=lambda: _f("HWI_RETENTION_S", 24 * 3600))
     # polling of the SN Device Driver (seconds)

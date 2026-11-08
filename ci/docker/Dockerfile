@@ -16,7 +16,7 @@ ENV DEBIAN_FRONTEND=noninteractive \
     ARDUINO_BOARD_MANAGER_ADDITIONAL_URLS=https://github.com/Ameba-AIoT/ameba-arduino-pro2/raw/main/Arduino_package/package_realtek_amebapro2_index.json \
     PIP_DISABLE_PIP_VERSION_CHECK=1
 RUN apt-get update && apt-get install -y --no-install-recommends \
-        python3 python3-pip g++ make git curl ca-certificates bzip2 xz-utils zip unzip cppcheck pyflakes3 mosquitto \
+        python3 python3-pip g++ make git curl ca-certificates bzip2 xz-utils zip unzip cppcheck pyflakes3 mosquitto ffmpeg \
     && rm -rf /var/lib/apt/lists/*
 RUN curl -fsSL https://github.com/arduino/arduino-cli/releases/download/v${ARDUINO_CLI_VERSION}/arduino-cli_${ARDUINO_CLI_VERSION}_Linux_64bit.tar.gz \
         | tar -xz -C /usr/local/bin arduino-cli \

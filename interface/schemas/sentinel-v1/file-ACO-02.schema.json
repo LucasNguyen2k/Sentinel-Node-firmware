@@ -89,6 +89,10 @@
         "edge",
         "node"
       ]
+    },
+    "gaps_ms": {
+      "type": "integer",
+      "minimum": 1
     }
   },
   "required": [

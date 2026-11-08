@@ -61,6 +61,7 @@ class AudioJob:
         self.dev, self.dataset, self.start, self.end, self.part_s = dev, dataset, start, end, part_s
         self.event, self.command_id, self.trigger = event, command_id, trigger
         self.next_start, self.part_no, self.files, self.done = start, 0, [], False
+        self.missing = 0
 
 
 class EventState:
@@ -84,6 +85,7 @@ class Device:
         self.config, self.birth_sig = {}, None
         self.rec_cursor, self.last_record = None, None
         self.ms_sec, self.ms_idx = None, 0
+        self.last_ms = None
         self.event = None
         self.last_chem01 = self.last_aco01 = self.last_img01 = 0.0
         self.last_img01_file = None
@@ -372,6 +374,11 @@ class HwInterface:
             time_ms, synced = int(dts) * 1000 + dev.ms_idx * 50, True
         else:
             time_ms, synced = int((rec.get("ts") or time.time()) * 1000), False
+        # unique and increasing: a second with more than 20 records continues at +1 ms; a large jump back
+        # (the node's clock was corrected) is taken as it is
+        if dev.last_ms is not None and dev.last_ms - 5000 < time_ms <= dev.last_ms:
+            time_ms = dev.last_ms + 1
+        dev.last_ms = time_ms
         flags = f.get("flags") or {}
         row = {"time_ms": time_ms, "temp_c": f.get("temp_c"), "rh_pct": f.get("rh_pct"),
                "mos_mv": self.s.counts_to_mv(f.get("gas_raw")), "gas_ppm": f.get("gas_ppm"),
@@ -764,21 +771,24 @@ class HwInterface:
                     b = min(b, job.end)
                 if b > now:
                     break                                   # the part is not over yet
-                if idx and idx.covers(a, b):
-                    data = idx.cut(a, b)
-                    self.write_audio(job, a, b, data)
+                if idx and idx.covers(a, b, self.s.audio_max_gap_s):
+                    data, gaps_ms = idx.cut(a, b)
+                    self.write_audio(job, a, b, data, gaps_ms)
                     job.next_start = b
                 elif now > b + self.s.audio_giveup_s:
                     log.warning("%s %s: no audio for %s..%s", job.dev.device_id, job.dataset, utc_iso(a), utc_iso(b))
                     job.next_start = b                       # give up on this part
                     if job.dataset == "ACO-01":
                         job.done = True
+                    else:
+                        job.part_no += 1                     # 3. the number stays used: the gap shows
+                        job.missing += 1
                 else:
                     break
         with self.lock:
             self.jobs = [j for j in self.jobs if not j.done]
 
-    def write_audio(self, job, a, b, data):
+    def write_audio(self, job, a, b, data, gaps_ms=0):
         dev = job.dev
         rel = self.area.rel_path(dev.device_id, job.dataset, a, "wav")
         size, sha = self.area.write(rel, data, dev.device_id, job.dataset)
@@ -786,6 +796,8 @@ class HwInterface:
         body.update({"path": rel, "content_type": "audio/wav", "size": size, "sha256": sha,
                      "recorded_from": utc_iso(a), "recorded_to": utc_iso(b),
                      "time_accuracy_ms": self.s.aco_time_accuracy_ms})
+        if gaps_ms:
+            body["gaps_ms"] = gaps_ms                        # silence inserted where the recording had a gap
         if job.dataset == "ACO-01":
             job.done = True
         else:
@@ -807,7 +819,8 @@ class HwInterface:
             c = self.commands.get(job.command_id)
             if c and not c.get("finished"):
                 c["finished"] = True
-                self.cmd_result(job.dev, job.command_id, "record_audio", "done", job.files, None)
+                self.cmd_result(job.dev, job.command_id, "record_audio", "done", job.files,
+                                "%d of %d parts without audio" % (job.missing, job.part_no) if job.missing else None)
 
     # ------------------------------------------------------------------ IMG-01
     def publish_img01(self, dev):

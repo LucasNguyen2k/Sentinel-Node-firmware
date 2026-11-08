@@ -35,6 +35,7 @@ def _topic_re(pattern):
 class NodeGatewayEmu:
     def __init__(self, host, port, data_root, client_id=None):
         self.data_root = os.path.abspath(data_root)
+        self.started = time.time()
         index = json.load(open(os.path.join(SCHEMA_DIR, "index.json")))
         self.validators = [(_topic_re(t["topic"]), t["schema"],
                             Draft202012Validator(json.load(open(os.path.join(SCHEMA_DIR, t["schema"] + ".schema.json")))))
@@ -200,8 +201,13 @@ class NodeGatewayEmu:
             for n in names:
                 if n.endswith(".part"):
                     continue
-                rel = os.path.relpath(os.path.join(d, n), self.data_root).replace(os.sep, "/")
-                if rel not in self.files:
+                full = os.path.join(d, n)
+                rel = os.path.relpath(full, self.data_root).replace(os.sep, "/")
+                try:
+                    older = os.path.getmtime(full) < self.started - 5     # announced before the monitor started
+                except OSError:
+                    continue
+                if rel not in self.files and not older:
                     found.append(rel)
         return found
 

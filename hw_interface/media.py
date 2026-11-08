@@ -40,13 +40,13 @@ class AudioIndex:
             out.append((start, start + n / float(rate), p, info))
         return out
 
-    def covers(self, t0, t1) -> bool:
-        """True if the recordings contain [t0, t1) without a gap larger than 50 ms."""
+    def covers(self, t0, t1, max_gap=0.05) -> bool:
+        """True if the recordings contain [t0, t1) with no gap longer than max_gap seconds."""
         t = t0
         for s, e, _, _ in self.segments():
             if e <= t:
                 continue
-            if s > t + 0.05:
+            if s > t + max_gap:
                 return False
             t = e
             if t >= t1:
@@ -54,28 +54,45 @@ class AudioIndex:
         return False
 
     def cut(self, t0, t1):
-        """WAV bytes of [t0, t1), in the recordings' own format, or None."""
-        frames, params = [], None
+        """(WAV bytes of [t0, t1) in the recordings' own format, milliseconds of silence inserted), or (None, 0).
+        Gaps between recordings are filled with silence so the file covers exactly [t0, t1); audio that two
+        recordings both contain is taken once."""
+        frames, params, cursor, gap_frames = [], None, t0, 0
         for s, e, p, (ch, sw, rate, n) in self.segments():
-            if e <= t0 or s >= t1:
+            if e <= cursor or s >= t1:
                 continue
-            a = max(0, int(round((t0 - s) * rate)))
+            params = params or (ch, sw, rate)
+            frame = ch * sw
+            if s > cursor:                                   # a gap before this recording
+                k = int(round((s - cursor) * rate))
+                frames.append(b"\x00" * (k * frame))
+                gap_frames += k
+                cursor = s
+            a = max(0, int(round((cursor - s) * rate)))
             b = min(n, int(round((t1 - s) * rate)))
             if b <= a:
                 continue
             with wave.open(p, "rb") as w:
                 w.setpos(a)
                 frames.append(w.readframes(b - a))
-            params = params or (ch, sw, rate)
+            cursor = s + b / float(rate)
         if not params:
-            return None
+            return None, 0
+        ch, sw, rate = params
+        want = int(round((t1 - t0) * rate))
+        have = sum(len(f) for f in frames) // (ch * sw)
+        if have < want:                                      # a gap at the end
+            frames.append(b"\x00" * ((want - have) * ch * sw))
+            gap_frames += want - have
+        data = b"".join(frames)[: want * ch * sw]
+        frames = [data]
         buf = io.BytesIO()
         with wave.open(buf, "wb") as w:
-            w.setnchannels(params[0])
-            w.setsampwidth(params[1])
-            w.setframerate(params[2])
-            w.writeframes(b"".join(frames))
-        return buf.getvalue()
+            w.setnchannels(ch)
+            w.setsampwidth(sw)
+            w.setframerate(rate)
+            w.writeframes(data)
+        return buf.getvalue(), int(round(gap_frames * 1000.0 / rate))
 
 
 def jpeg_size(data: bytes):

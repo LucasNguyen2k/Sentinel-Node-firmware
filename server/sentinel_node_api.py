@@ -37,6 +37,7 @@ import queue
 import secrets
 import select
 import selectors
+import shlex
 import shutil
 import signal
 import socket
@@ -70,7 +71,11 @@ CAMERA_API = "/get-picture"
 RTSP_PORT = 554
 SOCKET_BASE_PORT = 4000
 CAPTURE_GAP_TIME = 60          # seconds between automatic pictures
-AUDIO_SEGMENT_SECONDS = 60     # length of each finished WAV file
+AUDIO_SEGMENT_SECONDS = float(os.getenv("AMB82_AUDIO_SEGMENT_SECONDS", "60"))   # length of each finished WAV file
+# ffmpeg records continuously and splits the stream itself: segments join without gaps. Their start times come
+# from the audio stream; if that clock drifts from the server clock by more than this, the recording restarts.
+AUDIO_MAX_DRIFT_S = float(os.getenv("AMB82_AUDIO_MAX_DRIFT_S", "1.0"))
+AUDIO_INPUT = os.getenv("AMB82_AUDIO_INPUT", "")   # test hook: ffmpeg input instead of the node's RTSP stream
 SENSOR_IDLE_WARN = 30          # warn (but keep the connection) after this many silent seconds
 # A node that loses power never closes its TCP connection. These keepalive settings make
 # the kernel probe a silent connection after 30 s and drop it after 3 unanswered probes
@@ -78,7 +83,7 @@ SENSOR_IDLE_WARN = 30          # warn (but keep the connection) after this many 
 KEEPALIVE_IDLE, KEEPALIVE_INTERVAL, KEEPALIVE_COUNT = 30, 10, 3
 # A node counts as "online" if its last data arrived within this many seconds.
 ONLINE_WINDOW = int(os.getenv("AMB82_ONLINE_WINDOW", "30"))
-AUDIO_RECORDER = os.getenv("AMB82_AUDIO_RECORDER", "auto")   # auto | gst | ffmpeg
+AUDIO_RECORDER = os.getenv("AMB82_AUDIO_RECORDER", "auto")   # auto (ffmpeg, else gst) | ffmpeg | gst
 SENSOR_BUFFER_SIZE = 10_000    # sensor records kept in memory for the API
 # Storage of the SN Device Driver is kept as small as the HW Interface allows (it delivers the long-term data):
 # it reads the newest periodic picture (IMG-01), cuts audio from the newest segments (ACO-01/02), and downloads
@@ -759,7 +764,7 @@ class Device:
     # ---- audio (finished WAV segments)
     def _audio_command(self, tmp: Path) -> tuple[Optional[str], list[str]]:
         url = f"rtsp://{self.ip}:{RTSP_PORT}"
-        if AUDIO_RECORDER in ("auto", "gst") and shutil.which("gst-launch-1.0"):
+        if (AUDIO_RECORDER == "gst" or (AUDIO_RECORDER == "auto" and not shutil.which("ffmpeg"))) and shutil.which("gst-launch-1.0"):
             # -e: SIGINT sends EOS so wavenc writes a valid header
             return "gst", ["gst-launch-1.0", "-e", "rtspsrc", f"location={url}", "latency=100", "!",
                            "rtppcmadepay", "!", "alawdec", "!", "audioconvert", "!", "audioresample", "!",
@@ -772,6 +777,13 @@ class Device:
 
     def _audio_loop(self) -> None:
         while not self._stop_event.is_set():
+            if AUDIO_RECORDER in ("auto", "ffmpeg") and shutil.which("ffmpeg"):
+                if self._audio_warned:
+                    log.info("Audio recorder found: ffmpeg")
+                    self._audio_warned = False
+                if not self._audio_segments_ffmpeg() and not self._stop_event.is_set():
+                    self._stop_event.wait(5)          # stream not available: retry
+                continue
             final = self._media_dir("audio") / f"{_stamp(datetime.now())}.wav"
             tmp = final.with_name(f".{final.name}.part")
             tool, cmd = self._audio_command(tmp)
@@ -815,6 +827,77 @@ class Device:
                 log.warning("%s exited with %s for %s (no usable audio); retrying in 5 s",
                             tool, proc.returncode, self.ip)
                 self._stop_event.wait(5)
+
+    def _audio_segments_ffmpeg(self) -> bool:
+        """One continuous ffmpeg recording, split into AUDIO_SEGMENT_SECONDS segments by ffmpeg itself, so the
+        files join without gaps. Each finished segment is renamed to the driver's name scheme, stamped with the
+        wall-clock time its audio started: the moment the first segment appeared plus the segment's start in the
+        stream. Returns False if the stream could not be recorded."""
+        audio_dir = self._media_dir("audio")
+        staging = audio_dir / ".rec"
+        staging.mkdir(parents=True, exist_ok=True)
+        for old in staging.iterdir():
+            old.unlink(missing_ok=True)
+        seg_list = staging / "list.csv"
+        if AUDIO_INPUT:
+            inp = shlex.split(AUDIO_INPUT)
+        else:
+            inp = ["-i", f"rtsp://{self.ip}:{RTSP_PORT}"]      # ffmpeg's default transport, as before
+        cmd = (["ffmpeg", "-nostdin", "-hide_banner", "-loglevel", "error"] + inp +
+               ["-vn", "-acodec", "pcm_s16le", "-f", "segment", "-segment_time", str(AUDIO_SEGMENT_SECONDS),
+                "-segment_format", "wav", "-reset_timestamps", "1", "-segment_list", str(seg_list),
+                "-segment_list_type", "csv", str(staging / "seg%06d.wav")])
+        try:                                      # argument list, no shell: device name can't inject commands
+            proc = subprocess.Popen(cmd, stdout=subprocess.DEVNULL)
+        except OSError as e:
+            log.error("Cannot start ffmpeg: %s", e)
+            return False
+        base, handled, produced = None, 0, 0
+        first = staging / "seg000000.wav"
+
+        def collect() -> bool:
+            """Move the segments ffmpeg has finished; False when the stream clock has drifted too far."""
+            nonlocal handled, produced
+            try:
+                rows = [r.split(",") for r in seg_list.read_text().splitlines() if r.strip()]
+            except FileNotFoundError:
+                return True
+            for name, start_s, end_s in ((r[0], float(r[1]), float(r[2])) for r in rows[handled:] if len(r) >= 3):
+                handled += 1
+                src = staging / name
+                if base is None or not src.exists() or src.stat().st_size <= 44:
+                    src.unlink(missing_ok=True)
+                    continue
+                final = audio_dir / f"{_stamp(datetime.fromtimestamp(base + start_s))}.wav"
+                src.replace(final)
+                produced += 1
+                self._prune("audio", MAX_AUDIO_SEGMENTS)
+                drift = time.time() - (base + end_s)  # >0: stream behind the server clock
+                if abs(drift) > AUDIO_MAX_DRIFT_S + 2.0:   # +2 s: normal delay of a segment's list entry
+                    log.info("Audio clock of %s drifted %.1f s; restarting the recording", self.ip, drift)
+                    return False
+            return True
+
+        drifted = False
+        while proc.poll() is None and not self._stop_event.is_set():
+            if base is None and first.exists():
+                base = time.time()                # the first audio arrived just now
+            if not collect():
+                drifted = True
+                break
+            time.sleep(0.2)
+        if proc.poll() is None:
+            proc.send_signal(signal.SIGINT)       # ffmpeg finishes the current segment and the list
+            try:
+                proc.wait(timeout=10)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+                proc.wait()
+        collect()
+        if not drifted and not self._stop_event.is_set() and produced == 0:
+            log.warning("ffmpeg exited with %s for %s (no usable audio); retrying in 5 s", proc.returncode, self.ip)
+            return False
+        return True
 
     # ---- media file helpers
     def _media_dir(self, kind: str) -> Path:

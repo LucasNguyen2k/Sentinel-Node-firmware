@@ -248,6 +248,41 @@ def test_recovery_does_not_preempt_a_live_event_end(bench):
         hw.s.poll_events_s = old
 
 
+def _event_with_gaps(bench, gap_s, max_gap_s):
+    gw, hw = bench.gw, bench.hwi
+    gw.wait_for(lambda: gw.by_topic("data/CHEM-01", DEVICE_ID), 20, "steady state")
+    old = hw.s.audio_max_gap_s
+    bench.feeder.gap_s, hw.s.audio_max_gap_s = gap_s, max_gap_s
+    try:
+        before = {b["event_id"] for b in gw.by_topic("event/CHEM-03")}
+        time.sleep(3)
+        sim(bench, "SIM GAS 4")
+        eid = gw.wait_for(lambda: [b["event_id"] for b in gw.by_topic("event/CHEM-03", DEVICE_ID)
+                                   if b["notification"] == "start" and b["event_id"] not in before], 15, "start")[-1]
+        res = gw.wait_for(lambda: gw.evidence_complete(eid, "ACO-03"), 60, "ACO-03 end")
+        parts = [b for b in gw.by_topic("file/ACO-02", DEVICE_ID) if b["event_id"] == eid]
+        return res, parts
+    finally:
+        bench.feeder.gap_s, hw.s.audio_max_gap_s = 0, old
+
+
+def test_short_audio_gaps_are_bridged(bench):
+    """The recorder can leave short gaps (a restart): parts are still complete, the silence is reported."""
+    res, parts = _event_with_gaps(bench, gap_s=0.5, max_gap_s=3.0)
+    assert res["complete"], res
+    assert any(p.get("gaps_ms", 0) >= 400 for p in parts), [p.get("gaps_ms") for p in parts]
+    paths = {p["path"] for p in parts}
+    assert not [e for e in bench.gw.file_errors if e[0] in paths], bench.gw.file_errors   # each WAV = its window
+
+
+def test_lost_audio_parts_show_as_incomplete(bench):
+    """A part that cannot be cut keeps its number: the evidence shows incomplete instead of looking complete."""
+    res, parts = _event_with_gaps(bench, gap_s=0.5, max_gap_s=0.05)
+    assert not res["complete"] and res["received"] < res["expected"], res
+    nums = sorted(p["part"] for p in parts)
+    assert nums != list(range(1, len(nums) + 1)) or len(nums) < res["expected"], nums
+
+
 # ---------------------------------------------------------------------- interface integrity
 def test_interface_integrity(bench):
     gw = bench.gw
@@ -256,8 +291,9 @@ def test_interface_integrity(bench):
     assert gw.file_errors == [], gw.file_errors[:5]
     assert gw.seq_errors == [], gw.seq_errors[:5]
     assert gw.reconcile() == []
-    parts = [n for d, _, ns in os.walk(gw.data_root) for n in ns if n.endswith(".part")]
-    assert parts == []
+    # a file being written right now is fine; one that stays .part is not
+    gw.wait_for(lambda: not [n for d, _, ns in os.walk(gw.data_root) for n in ns if n.endswith(".part")], 5,
+                "no .part files")
 
 
 def test_seq_continues_after_restart(bench):
@@ -342,3 +378,44 @@ def test_first_seen_is_kept(tmp_path):
     time.sleep(0.05)
     assert led.first_seen("SN-00E04C0F5C9D") == t1
     assert Ledger(str(tmp_path / "s.db")).first_seen("SN-00E04C0F5C9D") == t1          # kept across restarts
+
+
+def test_synthetic_milliseconds_stay_unique_with_extra_records(tmp_path):
+    """The real node sometimes sends 21-22 records in one second: times must stay unique and increasing."""
+    from hw_interface.config import Settings
+    from hw_interface.service import Device, HwInterface
+    hw = HwInterface(Settings(data_root=str(tmp_path / "a"), state_db=str(tmp_path / "s.db")))
+    dev = Device("x")
+    got = []
+    for ts in [200] * 22 + [201, 201]:
+        hw.on_record(dev, {"fields": {"device_ts": ts, "gas_raw": 161}})
+        got.append(dev.last_record["time_ms"])
+    assert len(set(got)) == len(got) and got == sorted(got), got
+    assert got[19:22] == [200950, 200951, 200952] and got[22] == 201000
+
+
+def test_audio_cut_bridges_short_gaps(tmp_path):
+    import math
+    import struct
+    import wave as wv
+    from datetime import datetime
+    from hw_interface.media import AudioIndex
+
+    def seg(start, secs):
+        name = datetime.fromtimestamp(start).strftime("%Y%m%d_%H%M%S_%f") + ".wav"
+        with wv.open(str(tmp_path / name), "wb") as w:
+            w.setnchannels(1); w.setsampwidth(2); w.setframerate(16000)
+            w.writeframes(b"".join(struct.pack("<h", int(1000 * math.sin(i / 10))) for i in range(int(16000 * secs))))
+    t = 1793000000.0
+    seg(t, 2.0)
+    seg(t + 3.5, 2.0)                                      # 1.5 s gap
+    seg(t + 10.5, 2.0)                                     # 5 s gap
+    idx = AudioIndex(str(tmp_path))
+    assert not idx.covers(t + 1, t + 5)                    # default: no gap allowed
+    assert idx.covers(t + 1, t + 5, max_gap=3.0)
+    data, gaps_ms = idx.cut(t + 1, t + 5)
+    import io
+    with wv.open(io.BytesIO(data)) as w:
+        assert w.getnframes() == 4 * 16000                 # exactly the window
+    assert gaps_ms == 1500
+    assert not idx.covers(t + 4, t + 12, max_gap=3.0)      # a 5 s gap is not bridged
