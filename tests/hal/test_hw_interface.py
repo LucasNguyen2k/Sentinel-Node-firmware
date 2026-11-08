@@ -302,8 +302,15 @@ def test_seq_continues_after_restart(bench):
     bench.hwi.close()
     from hw_interface.service import HwInterface
     bench.hwi = HwInterface(bench.settings()).start()
+    n_before = len(gw.messages)
+    old_events = {b["event_id"] for b in gw.by_topic("event/CHEM-03", DEVICE_ID)}
     gw.wait_for(lambda: any(b["seq"] > last for b in gw.by_topic("heartbeat", DEVICE_ID)), 15, "heartbeat after restart")
+    time.sleep(4)
     assert gw.seq_errors == []
+    # nothing handled before the restart is published again (the driver still holds those events)
+    replayed = [(t, b.get("event_id")) for t, b in gw.messages[n_before:]
+                if ("/event/" in t or "/file/IMG-02" in t) and b.get("event_id") in old_events]
+    assert replayed == [], replayed
 
 
 def test_offline_node_command_expires(bench):

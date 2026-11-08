@@ -31,6 +31,16 @@ class Ledger:
             self.db.execute("CREATE TABLE IF NOT EXISTS events (device_id TEXT, node_event_id TEXT, "
                             "PRIMARY KEY (device_id, node_event_id))")
             self.db.execute("CREATE TABLE IF NOT EXISTS devices (device_id TEXT PRIMARY KEY, first_seen REAL)")
+            self.db.execute("CREATE TABLE IF NOT EXISTS kv (key TEXT PRIMARY KEY, value TEXT)")
+
+    def get(self, key, default=None):
+        with self.lock:
+            row = self.db.execute("SELECT value FROM kv WHERE key=?", (key,)).fetchone()
+            return row[0] if row else default
+
+    def put(self, key, value):
+        with self.lock, self.db:
+            self.db.execute("INSERT OR REPLACE INTO kv VALUES (?, ?)", (key, str(value)))
 
     def first_seen(self, device_id) -> float:
         """When this HW Interface first saw the node (recorded on the first call, kept across restarts)."""

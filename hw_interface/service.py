@@ -115,6 +115,9 @@ class HwInterface:
         self.cmd_queue = queue.Queue()
         self.pool = ThreadPoolExecutor(max_workers=4)
         self.event_cursor = None
+        # time of the newest driver event already handled, kept across restarts: after a restart of the HW Interface
+        # (or of the driver) the driver's event list is read again from the start, and older events are skipped
+        self.event_hwm = float(self.ledger.get("event_hwm", "0"))
         self.stop = threading.Event()
         self._last = {}
         self.mq = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, client_id=self.s.mqtt_client_id, clean_session=False,
@@ -470,11 +473,19 @@ class HwInterface:
         if self.event_cursor is not None and nxt is not None and nxt < self.event_cursor:
             self.event_cursor = 0                # driver restarted: read its new events from the start
             return
+        newest = self.event_hwm
         for e in r.get("events", []):
+            ts = float(e.get("ts") or 0)
+            if ts and ts <= self.event_hwm:
+                continue                                 # handled before a restart
             try:
                 self.on_event(e)
             except Exception:
                 log.exception("event %s failed", e.get("type"))
+            newest = max(newest, ts)
+        if newest > self.event_hwm:
+            self.event_hwm = newest
+            self.ledger.put("event_hwm", repr(newest))
         if nxt is not None:
             self.event_cursor = nxt
 
