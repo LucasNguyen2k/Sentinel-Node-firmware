@@ -313,6 +313,15 @@ def check_nodes(r, args, edge_env, leases):
         if sensor.get("online"):
             level = WARN if (st_age is not None and st_age > 180) else OK
             text = ident + "online · data %s · status %s" % (ago(age), ago(st_age))
+            try:                                         # the node's own health flags (0 = part not working)
+                st = (http_json(args.api + "/devices/%s/status" % d.get("ip"), key) or {}).get("status") or {}
+            except (urllib.error.URLError, OSError, ValueError):
+                st = {}
+            failed = [label for k, label in (("cam_ok", "camera"), ("mic_ok", "microphone"),
+                                             ("aht_ok", "temperature/humidity"), ("gas_ok", "gas sensor"))
+                      if st.get(k) == 0]
+            if failed:
+                level, text = WARN, text + " · not working: " + ", ".join(failed)
         else:
             level, text = FAIL, ident + "OFFLINE · last data %s" % ago(age)
         r.add(level, name, text)

@@ -249,7 +249,8 @@ def describe(topic, b):
         bits.append("board=%s fw=%s storage=%s" % (b.get("board_name"), b.get("firmware_version"), b.get("storage")))
     if topic.endswith("/heartbeat"):
         bits.append("online=%s" % b.get("link", {}).get("online"))
-    return "%s seq=%s %s" % (topic.split("/", 3)[3], b.get("seq"), " ".join(bits))
+    node = (b.get("device_id") or topic.split("/")[2])[-4:]          # which node: last 4 of the device_id
+    return "%s %s seq=%s %s" % (node, topic.split("/", 3)[3], b.get("seq"), " ".join(bits))
 
 
 def main():
