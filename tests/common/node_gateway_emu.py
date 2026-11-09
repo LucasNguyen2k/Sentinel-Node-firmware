@@ -263,7 +263,10 @@ def main():
     if a.send:
         if not a.device:
             ap.error("--send needs --device")
-        cid, results = gw.command(a.device, a.send, timeout=180, **json.loads(a.args))
+        args = json.loads(a.args)
+        # a recording answers after its duration; missing audio is given up only after a further 150 s
+        timeout = 180 + (float(args.get("duration_s", 0)) + 180 if a.send == "record_audio" else 0)
+        cid, results = gw.command(a.device, a.send, timeout=timeout, **args)
         for r in results:
             print(r["state"], r.get("detail") or "", " ".join(r.get("files", [])))
         gw.close()

@@ -76,6 +76,13 @@ AUDIO_SEGMENT_SECONDS = float(os.getenv("AMB82_AUDIO_SEGMENT_SECONDS", "60"))   
 # from the audio stream; if that clock drifts from the server clock by more than this, the recording restarts.
 AUDIO_MAX_DRIFT_S = float(os.getenv("AMB82_AUDIO_MAX_DRIFT_S", "1.0"))
 AUDIO_INPUT = os.getenv("AMB82_AUDIO_INPUT", "")   # test hook: ffmpeg input instead of the node's RTSP stream
+# watchdog: ffmpeg waits forever on a stream that stops sending; the recording is restarted when no audio arrives
+# this long after starting, or no new segment is finished within one segment length plus AUDIO_STALL_S
+AUDIO_START_TIMEOUT_S = float(os.getenv("AMB82_AUDIO_START_TIMEOUT_S", "30"))
+AUDIO_STALL_S = float(os.getenv("AMB82_AUDIO_STALL_S", "30"))
+# RTSP transport of the node's stream: "" = ffmpeg's default (UDP). The AMB82 stream server does not support "tcp"
+# ("Nonmatching transport in server reply"); lost UDP packets are filled with silence instead (see -af below)
+AUDIO_RTSP_TRANSPORT = os.getenv("AMB82_AUDIO_RTSP_TRANSPORT", "").strip().lower()
 SENSOR_IDLE_WARN = 30          # warn (but keep the connection) after this many silent seconds
 # A node that loses power never closes its TCP connection. These keepalive settings make
 # the kernel probe a silent connection after 30 s and drop it after 3 unanswered probes
@@ -842,9 +849,13 @@ class Device:
         if AUDIO_INPUT:
             inp = shlex.split(AUDIO_INPUT)
         else:
-            inp = ["-i", f"rtsp://{self.ip}:{RTSP_PORT}"]      # ffmpeg's default transport, as before
+            inp = (["-rtsp_transport", AUDIO_RTSP_TRANSPORT] if AUDIO_RTSP_TRANSPORT in ("tcp", "udp") else []) + \
+                  ["-i", f"rtsp://{self.ip}:{RTSP_PORT}"]
         cmd = (["ffmpeg", "-nostdin", "-hide_banner", "-loglevel", "error"] + inp +
-               ["-vn", "-acodec", "pcm_s16le", "-f", "segment", "-segment_time", str(AUDIO_SEGMENT_SECONDS),
+               # lost packets (UDP over Wi-Fi) leave holes in the timestamps: fill them with silence, so every
+               # segment holds its full length and the audio stays where it belongs in time
+               ["-vn", "-af", "aresample=async=1:min_hard_comp=0.01:first_pts=0",
+                "-acodec", "pcm_s16le", "-f", "segment", "-segment_time", str(AUDIO_SEGMENT_SECONDS),
                 "-segment_format", "wav", "-reset_timestamps", "1", "-segment_list", str(seg_list),
                 "-segment_list_type", "csv", str(staging / "seg%06d.wav")])
         try:                                      # argument list, no shell: device name can't inject commands
@@ -854,6 +865,7 @@ class Device:
             return False
         base, handled, produced = None, 0, 0
         first = staging / "seg000000.wav"
+        started = last_progress = time.time()
 
         def collect() -> bool:
             """Move the segments ffmpeg has finished; False when the stream clock has drifted too far."""
@@ -878,12 +890,25 @@ class Device:
                     return False
             return True
 
-        drifted = False
+        drifted = stalled = False
         while proc.poll() is None and not self._stop_event.is_set():
+            now = time.time()
             if base is None and first.exists():
-                base = time.time()                # the first audio arrived just now
+                base = last_progress = now        # the first audio arrived just now
+            before = produced
             if not collect():
                 drifted = True
+                break
+            if produced != before:
+                last_progress = now
+            if base is None and now - started > AUDIO_START_TIMEOUT_S:
+                log.warning("No audio from %s within %.0f s; restarting the recording", self.ip, AUDIO_START_TIMEOUT_S)
+                stalled = True
+                break
+            if base is not None and now - last_progress > AUDIO_SEGMENT_SECONDS + AUDIO_STALL_S:
+                log.warning("Audio from %s stalled (no new segment for %.0f s); restarting the recording",
+                            self.ip, now - last_progress)
+                stalled = True
                 break
             time.sleep(0.2)
         if proc.poll() is None:
@@ -894,6 +919,8 @@ class Device:
                 proc.kill()
                 proc.wait()
         collect()
+        if stalled:
+            return False                          # retried after 5 s
         if not drifted and not self._stop_event.is_set() and produced == 0:
             log.warning("ffmpeg exited with %s for %s (no usable audio); retrying in 5 s", proc.returncode, self.ip)
             return False

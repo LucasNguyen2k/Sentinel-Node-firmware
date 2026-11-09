@@ -847,8 +847,12 @@ class HwInterface:
             c = self.commands.get(job.command_id)
             if c and not c.get("finished"):
                 c["finished"] = True
-                self.cmd_result(job.dev, job.command_id, "record_audio", "done", job.files,
-                                "%d of %d parts without audio" % (job.missing, job.part_no) if job.missing else None)
+                if not job.files:                    # nothing recorded at all: the command could not be carried out
+                    self.cmd_result(job.dev, job.command_id, "record_audio", "expired", [],
+                                    "no audio recorded (%d parts)" % job.part_no)
+                else:
+                    self.cmd_result(job.dev, job.command_id, "record_audio", "done", job.files,
+                                    "%d of %d parts without audio" % (job.missing, job.part_no) if job.missing else None)
 
     # ------------------------------------------------------------------ IMG-01
     def publish_img01(self, dev):
