@@ -75,6 +75,7 @@ class EventState:
         self.chem_end_ms, self.chem_end_deadline, self.chem_done = None, None, False
         self.audio = None
         self.img_parts, self.last_img_t, self.img_pending = 0, start_t, 0
+        self.img_inflight = 0               # pictures counted but not yet announced: IMG-03 end waits for them
         self.img_end_sent, self.ended, self.end_t, self.end_late = False, False, None, False
 
 
@@ -594,7 +595,7 @@ class HwInterface:
                 self.request_capture(dev, {"kind": "event", "event": ev})
             if ev.ended and not ev.chem_done and now >= ev.chem_end_deadline:
                 self.flush_chem(dev, ev, final=True)
-            if ev.ended and not ev.img_end_sent and ev.img_pending == 0:
+            if ev.ended and not ev.img_end_sent and ev.img_pending == 0 and ev.img_inflight == 0:
                 if ev.img_parts < self.s.min_event_images:
                     ev.last_img_t = now
                     self.request_capture(dev, {"kind": "event", "event": ev})
@@ -658,22 +659,28 @@ class HwInterface:
                 event, trigger, cmd_id = None, "event" if node_id.startswith("E") else "command", None
             if event is not None:
                 event.img_parts += 1
+                event.img_inflight += 1
                 part, event_id = event.img_parts, event.event_id
             else:
                 event_id = (ctx or {}).get("event_id") or (node_id if node_id.startswith("E") else None)
                 key = event_id or ("cmd:" + str(cmd_id))
                 dev.event_img_parts[key] = dev.event_img_parts.get(key, 0) + 1
                 part = dev.event_img_parts[key]
-        w, h = jpeg_size(data)
-        rel = self.area.rel_path(dev.device_id, "IMG-02", t, "jpg")
-        size, sha = self.area.write(rel, data, dev.device_id, "IMG-02")
-        body = self.common(dev, "IMG-02", t)
-        body.update({"path": rel, "content_type": "image/jpeg", "size": size, "sha256": sha, "event_id": event_id,
-                     "part": part, "trigger": trigger, "command_id": cmd_id, "width": w, "height": h})
-        if event is None and node_id.startswith("E") and not self.ledger.event_known(dev.device_id, node_id):
-            body["late"] = True                          # a picture the node kept during an outage
-        self.publish(dev, "file/IMG-02", body)
-        self.notify(dev, "IMG-03", event_id, "record", command_id=cmd_id, part=part, path=rel, size=size)
+        try:                                             # counted as in flight until announced (or failed)
+            w, h = jpeg_size(data)
+            rel = self.area.rel_path(dev.device_id, "IMG-02", t, "jpg")
+            size, sha = self.area.write(rel, data, dev.device_id, "IMG-02")
+            body = self.common(dev, "IMG-02", t)
+            body.update({"path": rel, "content_type": "image/jpeg", "size": size, "sha256": sha, "event_id": event_id,
+                         "part": part, "trigger": trigger, "command_id": cmd_id, "width": w, "height": h})
+            if event is None and node_id.startswith("E") and not self.ledger.event_known(dev.device_id, node_id):
+                body["late"] = True                      # a picture the node kept during an outage
+            self.publish(dev, "file/IMG-02", body)
+            self.notify(dev, "IMG-03", event_id, "record", command_id=cmd_id, part=part, path=rel, size=size)
+        finally:
+            if event is not None:
+                with self.lock:
+                    event.img_inflight -= 1
         if ctx and ctx.get("kind") == "command":
             self.command_progress(ctx["command_id"], rel)
 
@@ -833,9 +840,10 @@ class HwInterface:
             event_id = job.event.event_id if job.event else getattr(job, "event_id", None)
             body.update({"event_id": event_id, "part": job.part_no, "trigger": job.trigger,
                          "command_id": job.command_id, "recorded_by": "edge"})
-            self.notify(dev, "ACO-03", event_id, "record", command_id=job.command_id, part=job.part_no, path=rel, size=size)
         job.files.append(rel)
-        self.publish(dev, "file/" + job.dataset, body)
+        self.publish(dev, "file/" + job.dataset, body)      # the file-ready message first (spec 6.2) ...
+        if job.dataset != "ACO-01":                          # ... then the notification that refers to it
+            self.notify(dev, "ACO-03", event_id, "record", command_id=job.command_id, part=job.part_no, path=rel, size=size)
 
     def finish_job(self, job):
         job.done = True

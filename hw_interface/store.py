@@ -97,17 +97,34 @@ class DataArea:
         final = os.path.join(self.root, rel)
         os.makedirs(os.path.dirname(final), exist_ok=True)
         part = final + ".part"
-        with open(part, "wb") as f:
-            f.write(data)
-            f.flush()
-            os.fsync(f.fileno())
-        os.replace(part, final)
+        try:
+            with open(part, "wb") as f:
+                f.write(data)
+                f.flush()
+                os.fsync(f.fileno())
+            os.replace(part, final)
+        except BaseException:
+            try:                                 # never leave a half-written file behind
+                os.remove(part)
+            except OSError:
+                pass
+            raise
         sha = hashlib.sha256(data).hexdigest()
         self.ledger.add_file(rel, device_id, dataset_id, len(data), sha)
         return len(data), sha
 
     def cleanup(self, retention_s) -> int:
         removed = 0
+        stale = time.time() - 3600                       # .part files of a write killed half-way (service stopped)
+        for d, _, names in os.walk(self.root):
+            for n in names:
+                if n.endswith(".part"):
+                    p = os.path.join(d, n)
+                    try:
+                        if os.path.getmtime(p) < stale:
+                            os.remove(p)
+                    except OSError:
+                        pass
         for rel in self.ledger.files_older_than(time.time() - retention_s):
             try:
                 os.remove(os.path.join(self.root, rel))

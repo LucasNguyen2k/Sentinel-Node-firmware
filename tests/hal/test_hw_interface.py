@@ -105,6 +105,34 @@ def test_short_event_still_gets_two_pictures(bench):
         bench.hwi.s.event_img_every_s = 3
 
 
+def test_img03_end_waits_for_pictures_being_written(bench):
+    """A picture still being written (slow disk) when the event ends: IMG-03 end must come after its file-ready."""
+    gw, hw = bench.gw, bench.hwi
+    gw.wait_for(lambda: gw.by_topic("data/CHEM-01", DEVICE_ID), 20, "steady state")
+    real_write = hw.area.write
+
+    def slow_write(rel, data, device_id, dataset_id):
+        if dataset_id == "IMG-02":
+            time.sleep(1.5)
+        return real_write(rel, data, device_id, dataset_id)
+    old_every = hw.s.event_img_every_s
+    hw.area.write, hw.s.event_img_every_s = slow_write, 600
+    try:
+        before = {b["event_id"] for b in gw.by_topic("event/CHEM-03")}
+        sim(bench, "SIM GAS 1")
+        eid = gw.wait_for(lambda: [b["event_id"] for b in gw.by_topic("event/CHEM-03", DEVICE_ID)
+                                   if b["notification"] == "start" and b["event_id"] not in before], 15, "start")[-1]
+        gw.wait_for(lambda: gw.evidence_complete(eid, "IMG-03"), 40, "IMG-03 end")
+        seq = [(t.split("/", 3)[3], b.get("notification")) for t, b in gw.messages if b.get("event_id") == eid
+               and ("/file/IMG-02" in t or "/event/IMG-03" in t)]
+        last_file = max(i for i, (k, n) in enumerate(seq) if k == "file/IMG-02")
+        end = [i for i, (k, n) in enumerate(seq) if n == "end"][0]
+        assert end > last_file, seq
+        assert gw.evidence_complete(eid, "IMG-03")["complete"]
+    finally:
+        hw.area.write, hw.s.event_img_every_s = real_write, old_every
+
+
 # ---------------------------------------------------------------------- commands
 def states(results):
     return [r["state"] for r in results]
@@ -125,6 +153,12 @@ def test_record_audio_command(bench):
     assert sorted(p["part"] for p in parts) == [1, 2] and all(p["trigger"] == "command" for p in parts)
     end = gw.wait_for(lambda: gw.events.get((DEVICE_ID, "cmd:" + cid, "ACO-03"), {}).get("end"), 10, "ACO-03 end")
     assert end["parts_total"] == 2 and end["command_id"] == cid
+    assert gw.evidence_complete("cmd:" + cid, "ACO-03")["complete"]          # the monitor counts command files
+    # each file-ready message comes before the notification that refers to it (spec 6.2)
+    order = [(t.split("/", 3)[3], b.get("part")) for t, b in gw.messages
+             if b.get("command_id") == cid and ("/file/ACO-02" in t or b.get("notification") == "record")]
+    for part in (1, 2):
+        assert order.index(("file/ACO-02", part)) < order.index(("event/ACO-03", part)), order
 
 
 def test_stop_recording_command(bench):
@@ -292,8 +326,12 @@ def test_interface_integrity(bench):
     assert gw.seq_errors == [], gw.seq_errors[:5]
     assert gw.reconcile() == []
     # a file being written right now is fine; one that stays .part is not
-    gw.wait_for(lambda: not [n for d, _, ns in os.walk(gw.data_root) for n in ns if n.endswith(".part")], 5,
-                "no .part files")
+    try:
+        gw.wait_for(lambda: not [n for d, _, ns in os.walk(gw.data_root) for n in ns if n.endswith(".part")], 5,
+                    "no .part files")
+    except AssertionError:
+        raise AssertionError("left over: %s" % [os.path.join(d, n) for d, _, ns in os.walk(gw.data_root)
+                                                 for n in ns if n.endswith(".part")])
 
 
 def test_seq_continues_after_restart(bench):
@@ -486,3 +524,19 @@ def test_picture_of_unseen_event_is_late(tmp_path):
     hw.on_event_image(dev, {"event_id": "E9_2", "url": "/y", "ts": 1794114200.0})       # an event seen live
     files = [b for s, b in sent if s == "file/IMG-02"]
     assert files[0].get("late") is True and "late" not in files[1]
+
+
+def test_failed_write_leaves_no_part_file(tmp_path):
+    from hw_interface.store import DataArea, Ledger
+    area = DataArea(str(tmp_path / "area"), Ledger(str(tmp_path / "s.db")))
+    rel = area.rel_path("SN-00E04C0F6AC5", "IMG-02", 1794114100.0, "jpg")
+    with pytest.raises(TypeError):
+        area.write(rel, None, "SN-00E04C0F6AC5", "IMG-02")            # the write fails half-way
+    left = [n for d, _, ns in os.walk(area.root) for n in ns]
+    assert left == [], left
+    old = os.path.join(area.root, "SN-00E04C0F6AC5", "IMG-02", "x.jpg.part")   # killed mid-write long ago
+    os.makedirs(os.path.dirname(old), exist_ok=True)
+    open(old, "wb").write(b"x")
+    os.utime(old, (time.time() - 7200, time.time() - 7200))
+    area.cleanup(24 * 3600)
+    assert not os.path.exists(old)

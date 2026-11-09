@@ -189,7 +189,11 @@ class NodeGatewayEmu:
         if not e["end"]:
             return None
         file_ds = EVIDENCE.get(notif_dataset)
-        parts = {b.get("part") for b in self.files.values() if b.get("event_id") == event_id and b.get("dataset_id") == file_ds
+        if str(event_id).startswith("cmd:"):                  # a command's recording: its files carry command_id
+            match = lambda b: b.get("command_id") == event_id[4:]
+        else:
+            match = lambda b: b.get("event_id") == event_id
+        parts = {b.get("part") for b in self.files.values() if match(b) and b.get("dataset_id") == file_ds
                  and b.get("device_id") == dev and b.get("recorded_by", "edge") == "edge"}
         total = e["end"].get("parts_total")
         return {"expected": total, "received": len(parts), "complete": len(parts) == total and parts == set(range(1, total + 1))}
