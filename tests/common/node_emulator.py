@@ -27,8 +27,12 @@ HELP = ("PING STATUS CONFIG SET <k> <v> SAVE RESET_CONFIG CAPTURE CAL_GAS CAL_AC
 class NodeEmulator:
     def __init__(self, ip="127.0.0.44", server="127.0.0.1", reg_port=8900, name="EZ_EMU", mac="00E04C000044",
                  fw="1.3.1", hb_s=2.0, upload_s=0.5, event_hold_s=3.0, ota_capable=False, tagged=True,
-                 send_records=True, flash_mb=16):
+                 send_records=True, flash_mb=16, camera="ok"):
         self.ip, self.server, self.reg_port = ip, server, reg_port
+        # camera: "ok"; "failed" = reports cam_ok 0 and takes no pictures; "silent" = reports cam_ok 1 but no
+        # picture ever arrives (like firmware 1.6.1, whose CAPTURE always answers OK)
+        self.camera = camera
+        self.captures = 0
         self.name, self.mac, self.fw = name, mac, fw
         self.hb_s, self.upload_s, self.event_hold_s = hb_s, upload_s, event_hold_s
         self.ota_capable, self.tagged, self.send_records = ota_capable, tagged, send_records
@@ -111,7 +115,7 @@ class NodeEmulator:
                 "maint": int(self.cfg["maint"]), "int_temp_raw": 105, "int_temp_c": "null", "amb_temp_c": 24.5,
                 "rh_pct": 60.1, "aht_ok": 1, "gas_raw": 161, "gas_rs_kohm": 53.4, "gas_ppm": -1.0, "gas_lel_pct": -1.0,
                 "gas_ok": 1, "gas_calibrated": 0, "gas_warm": 1, "mic_ok": 1, "ac_db": -43.0, "ac_hf_db": -57.0,
-                "ac_floor_db": -56.0, "us": "null", "battery": "null", "tamper": "null", "cam_ok": 1, "captures": 0,
+                "ac_floor_db": -56.0, "us": "null", "battery": "null", "tamper": "null", "cam_ok": 0 if self.camera == "failed" else 1, "captures": self.captures,
                 "storage": "flash", "flash_ok": 1, "flash_buf_pending": 0, "flash_buf_used_pct": 0,
                 "flash_buf_dropped": 0, "flash_buf_thinned": 0, "flash_evt_records": len(self.event_log),
                 "flash_corrupt": 0, "flash_max_erase": 3, "sd_ok": 0, "sd_buffered": 0, "sd_dropped": 0, "event_state": self.event_state, "event_id": self.event_id,
@@ -133,6 +137,8 @@ class NodeEmulator:
         return self.http("GET", "/node-status?" + urllib.parse.urlencode(self.status_fields()))
 
     def post_image(self, event_id, jpeg=None):
+        if self.camera != "ok":
+            return 0, ""                                 # the camera does not work: no picture is sent
         if self.offline():
             self.pending_pics.append(event_id)                # like the firmware: kept for a later upload
             return 0, ""
@@ -249,6 +255,7 @@ class NodeEmulator:
             return ("AHT20:PASS\nGAS_ADC:PASS raw=161\nMIC:PASS\nCAMERA:PASS bytes=48000\nSD:PASS\nFLASH_CFG:PASS\n"
                     "WIFI:PASS rssi=-35\nULTRASONIC:N/A (OP-01)\nPOWER:N/A (OP-04)\nTAMPER:N/A (OP-08)\nRESULT:PASS")
         if cmd == "CAPTURE":
+            self.captures += 1
             self.event_counter += 1
             eid = "M%d_%d" % (self.boot_count, self.event_counter)
             threading.Thread(target=self.post_image, args=(eid,), daemon=True).start()

@@ -317,6 +317,40 @@ def test_lost_audio_parts_show_as_incomplete(bench):
     assert nums != list(range(1, len(nums) + 1)) or len(nums) < res["expected"], nums
 
 
+def _event_on_node_without_camera(bench, camera, last_octet):
+    """A second node whose camera does not work; returns (IMG-03 end, captures asked of the node)."""
+    from node_emulator import NodeEmulator
+    gw = bench.gw
+    mac = "00E04C0000%02X" % last_octet
+    dev = "SN-" + mac
+    node = NodeEmulator(ip="127.0.0.%d" % last_octet, reg_port=bench.srv.reg_port, name="EZ_SN_%03d" % last_octet,
+                        mac=mac, fw="1.6.1", hb_s=1.0, event_hold_s=2.0, flash_mb=32, camera=camera).start()
+    try:
+        gw.wait_for(lambda: gw.by_topic("heartbeat", dev), 20, "the second node online")
+        r = bench.srv.post("/devices/127.0.0.%d/command" % last_octet, json={"command": "SIM GAS 1", "timeout": 10})
+        assert str(r.json().get("reply", "")).startswith("OK"), r.text
+        end = gw.wait_for(lambda: [b for b in gw.by_topic("event/IMG-03", dev) if b["notification"] == "end"],
+                          60, "IMG-03 end")[-1]
+        asked = node.captures
+        time.sleep(10)
+        assert node.captures == asked, "capture requests continued after the end"
+        return end, asked
+    finally:
+        node.stop()
+
+
+def test_event_on_node_with_failed_camera(bench):
+    """The node reports its camera failed: no picture is asked for, and IMG-03 still ends (0 pictures)."""
+    end, asked = _event_on_node_without_camera(bench, "failed", 61)
+    assert end["parts_total"] == 0 and asked == 0, (end, asked)
+
+
+def test_event_on_node_whose_camera_fails_silently(bench):
+    """Firmware 1.6.1 answers CAPTURE with OK even when no picture can be taken: a few tries, then IMG-03 ends."""
+    end, asked = _event_on_node_without_camera(bench, "silent", 62)
+    assert end["parts_total"] == 0 and 1 <= asked <= 4, (end, asked)
+
+
 # ---------------------------------------------------------------------- interface integrity
 def test_interface_integrity(bench):
     gw = bench.gw

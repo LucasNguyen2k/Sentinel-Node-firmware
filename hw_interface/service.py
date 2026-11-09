@@ -25,6 +25,7 @@ from .store import DataArea, Ledger, utc_iso
 log = logging.getLogger("hw_interface")
 TOPIC = "sentinel/v1/%s/%s"
 ORDER = {"NORMAL": 0, "SUSPECT": 1, "CONFIRMED": 2}
+END_CAPTURE_TRIES = 2       # after an event, at most this many extra pictures are asked for to reach the minimum
 LOG_LINE = re.compile(r"^(\d+),([EM]\d+_\d+),(SUSPECT|CONFIRMED|NORMAL)\b")
 
 
@@ -76,6 +77,7 @@ class EventState:
         self.audio = None
         self.img_parts, self.last_img_t, self.img_pending = 0, start_t, 0
         self.img_inflight = 0               # pictures counted but not yet announced: IMG-03 end waits for them
+        self.end_capture_tries = 0          # extra pictures asked for after the end (at most END_CAPTURE_TRIES)
         self.img_end_sent, self.ended, self.end_t, self.end_late = False, False, None, False
 
 
@@ -590,17 +592,22 @@ class HwInterface:
         if ev is None:
             return
         with self.lock:
-            if not ev.ended and ev.img_pending == 0 and now - ev.last_img_t >= self.s.event_img_every_s:
+            camera_ok = dev.status.get("cam_ok") != 0          # the node reports a failed camera: ask for nothing
+            if not ev.ended and camera_ok and ev.img_pending == 0 and now - ev.last_img_t >= self.s.event_img_every_s:
                 ev.last_img_t = now
                 self.request_capture(dev, {"kind": "event", "event": ev})
             if ev.ended and not ev.chem_done and now >= ev.chem_end_deadline:
                 self.flush_chem(dev, ev, final=True)
             if ev.ended and not ev.img_end_sent and ev.img_pending == 0 and ev.img_inflight == 0:
-                if ev.img_parts < self.s.min_event_images:
+                if ev.img_parts < self.s.min_event_images and camera_ok and ev.end_capture_tries < END_CAPTURE_TRIES:
+                    ev.end_capture_tries += 1
                     ev.last_img_t = now
                     self.request_capture(dev, {"kind": "event", "event": ev})
-                else:
+                else:                                        # enough pictures, or none can be had: close honestly
                     ev.img_end_sent = True
+                    if ev.img_parts < self.s.min_event_images:
+                        log.warning("%s event %s: only %d picture(s)%s", dev.device_id, ev.event_id, ev.img_parts,
+                                    "" if camera_ok else " (camera reported failed)")
                     self.notify(dev, "IMG-03", ev.event_id, "end", total=ev.img_parts)
 
     def request_capture(self, dev, ctx):
