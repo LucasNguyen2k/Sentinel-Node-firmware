@@ -204,10 +204,12 @@ class NodeGatewayEmu:
                 full = os.path.join(d, n)
                 rel = os.path.relpath(full, self.data_root).replace(os.sep, "/")
                 try:
-                    older = os.path.getmtime(full) < self.started - 5     # announced before the monitor started
+                    mtime = os.path.getmtime(full)
                 except OSError:
                     continue
-                if rel not in self.files and not older:
+                older = mtime < self.started - 5                         # announced before the monitor started
+                settling = mtime > time.time() - 5                       # just written: its message may be on the way
+                if rel not in self.files and not older and not settling:
                     found.append(rel)
         return found
 

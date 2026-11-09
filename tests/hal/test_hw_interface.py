@@ -426,3 +426,63 @@ def test_audio_cut_bridges_short_gaps(tmp_path):
         assert w.getnframes() == 4 * 16000                 # exactly the window
     assert gaps_ms == 1500
     assert not idx.covers(t + 4, t + 12, max_gap=3.0)      # a 5 s gap is not bridged
+
+
+def test_chem01_not_repeated_without_new_reading(tmp_path):
+    """While no new records arrive (driver or node down), CHEM-01 must not repeat the last old reading."""
+    from hw_interface.config import Settings
+    from hw_interface.service import Device, HwInterface
+    hw = HwInterface(Settings(data_root=str(tmp_path / "a"), state_db=str(tmp_path / "s.db")))
+    sent = []
+    hw.publish = lambda dev, suffix, body, retain=False: sent.append(body)
+    dev = Device("x")
+    dev.device_id, dev.boot_count = "SN-00E04C0F6AC5", 8
+    hw.on_record(dev, {"fields": {"device_ts": 300, "gas_raw": 161, "temp_c": 24.0, "rh_pct": 50.0}})
+    assert hw.maybe_chem01(dev) is True and len(sent) == 1
+    assert hw.maybe_chem01(dev) is False and hw.maybe_chem01(dev) is False and len(sent) == 1   # stale: skipped
+    hw.on_record(dev, {"fields": {"device_ts": 420, "gas_raw": 162, "temp_c": 24.1, "rh_pct": 50.2}})
+    assert hw.maybe_chem01(dev) is True and len(sent) == 2                                       # new reading: sent
+
+
+def test_node_alaw_clip_becomes_pcm16():
+    """The node keeps its outage clips as G.711 A-law; the ACO datasets are 16-bit PCM."""
+    import io
+    import struct
+    import wave as wv
+    from hw_interface import media
+    try:
+        import warnings
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", DeprecationWarning)
+            import audioop                                   # reference decoder (Python <= 3.12)
+        for b in range(256):
+            assert media._ALAW[b] == struct.unpack("<h", audioop.alaw2lin(bytes([b]), 2))[0], b
+            assert media._ULAW[b] == struct.unpack("<h", audioop.ulaw2lin(bytes([b]), 2))[0], b
+    except ImportError:
+        assert media._ALAW[0xD5] == 8 and media._ALAW[0x55] == -8
+    payload = bytes(range(256)) * 312 + bytes(128)           # 80,000 A-law samples = 5 s at 16 kHz
+    fmt = struct.pack("<HHIIHH", 6, 1, 16000, 16000, 1, 8)
+    clip = (b"RIFF" + struct.pack("<I", 4 + 8 + len(fmt) + 8 + len(payload)) + b"WAVE" +
+            b"fmt " + struct.pack("<I", len(fmt)) + fmt + b"data" + struct.pack("<I", len(payload)) + payload)
+    assert len(clip) == 80044                                # what the node sent on the bench
+    pcm = media.wav_to_pcm16(clip)
+    assert len(pcm) == 160044
+    with wv.open(io.BytesIO(pcm)) as w:
+        assert (w.getnchannels(), w.getsampwidth(), w.getframerate(), w.getnframes()) == (1, 2, 16000, 80000)
+    assert media.wav_to_pcm16(pcm) == pcm                    # PCM stays as it is
+
+
+def test_picture_of_unseen_event_is_late(tmp_path):
+    from hw_interface.config import Settings
+    from hw_interface.service import Device, HwInterface
+    hw = HwInterface(Settings(data_root=str(tmp_path / "a"), state_db=str(tmp_path / "s.db")))
+    sent = []
+    hw.publish = lambda dev, suffix, body, retain=False: sent.append((suffix, body))
+    hw.driver.download = lambda url: b"\xff\xd8\xff\xd9"
+    dev = Device("x")
+    dev.device_id, dev.boot_count = "SN-00E04C0F6AC5", 9
+    hw.on_event_image(dev, {"event_id": "E9_1", "url": "/x", "ts": 1794114100.0})       # kept during an outage
+    hw.ledger.mark_event(dev.device_id, "E9_2")
+    hw.on_event_image(dev, {"event_id": "E9_2", "url": "/y", "ts": 1794114200.0})       # an event seen live
+    files = [b for s, b in sent if s == "file/IMG-02"]
+    assert files[0].get("late") is True and "late" not in files[1]

@@ -114,3 +114,56 @@ def jpeg_size(data: bytes):
             return w, h
         i += 2 + seg_len
     return None, None
+
+
+def _alaw_to_linear(a):
+    """G.711 A-law byte -> 16-bit sample (ITU-T G.711, as in the reference implementation g711.c)."""
+    a ^= 0x55
+    t = (a & 0x0F) << 4
+    seg = (a & 0x70) >> 4
+    if seg == 0:
+        t += 8
+    elif seg == 1:
+        t += 0x108
+    else:
+        t = (t + 0x108) << (seg - 1)
+    return t if a & 0x80 else -t
+
+
+def _ulaw_to_linear(u):
+    """G.711 mu-law byte -> 16-bit sample."""
+    u = ~u & 0xFF
+    t = ((u & 0x0F) << 3) + 0x84
+    t <<= (u & 0x70) >> 4
+    return (0x84 - t) if u & 0x80 else (t - 0x84)
+
+
+_ALAW = [_alaw_to_linear(i) for i in range(256)]
+_ULAW = [_ulaw_to_linear(i) for i in range(256)]
+
+
+def wav_to_pcm16(data: bytes) -> bytes:
+    """A WAV in G.711 A-law (format 6) or mu-law (7), as the node stores its outage clips, converted to 16-bit
+    PCM, the format of every ACO dataset. PCM input (format 1) is returned unchanged."""
+    if data[:4] != b"RIFF" or data[8:12] != b"WAVE":
+        return data
+    pos, fmt, ch, rate, payload = 12, None, 1, 16000, None
+    while pos + 8 <= len(data):
+        cid, size = data[pos:pos + 4], struct.unpack("<I", data[pos + 4:pos + 8])[0]
+        body = data[pos + 8:pos + 8 + size]
+        if cid == b"fmt ":
+            fmt, ch, rate = struct.unpack("<HHI", body[:8])
+        elif cid == b"data":
+            payload = body
+        pos += 8 + size + (size & 1)
+    if fmt not in (6, 7) or payload is None:
+        return data
+    table = _ALAW if fmt == 6 else _ULAW
+    pcm = struct.pack("<%dh" % len(payload), *(table[b] for b in payload))
+    buf = io.BytesIO()
+    with wave.open(buf, "wb") as w:
+        w.setnchannels(ch)
+        w.setsampwidth(2)
+        w.setframerate(rate)
+        w.writeframes(pcm)
+    return buf.getvalue()

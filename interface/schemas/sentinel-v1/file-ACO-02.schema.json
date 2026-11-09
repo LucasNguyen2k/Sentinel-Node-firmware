@@ -93,6 +93,9 @@
     "gaps_ms": {
       "type": "integer",
       "minimum": 1
+    },
+    "late": {
+      "type": "boolean"
     }
   },
   "required": [

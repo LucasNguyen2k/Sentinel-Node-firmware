@@ -19,7 +19,7 @@ import paho.mqtt.client as mqtt
 
 from .config import CONFIG_PRIVATE, CONFIG_SET_ALLOWED, Settings
 from .driver import DriverClient
-from .media import AudioIndex, driver_stamp_to_epoch, jpeg_size
+from .media import AudioIndex, driver_stamp_to_epoch, jpeg_size, wav_to_pcm16
 from .store import DataArea, Ledger, utc_iso
 
 log = logging.getLogger("hw_interface")
@@ -86,6 +86,7 @@ class Device:
         self.rec_cursor, self.last_record = None, None
         self.ms_sec, self.ms_idx = None, 0
         self.last_ms = None
+        self.last_chem01_ms, self.chem01_stale_warned = None, False
         self.event = None
         self.last_chem01 = self.last_aco01 = self.last_img01 = 0.0
         self.last_img01_file = None
@@ -203,7 +204,7 @@ class HwInterface:
                 continue
             if now - dev.last_chem01 >= s.chem01_s and dev.last_record:
                 dev.last_chem01 = now
-                self.publish_chem01(dev)
+                self.maybe_chem01(dev)
             if now - dev.last_aco01 >= s.aco01_every_s:
                 dev.last_aco01 = now
                 with self.lock:
@@ -436,6 +437,19 @@ class HwInterface:
             body["late"] = True
         self.publish(dev, "file/CHEM-02", body)
 
+    def maybe_chem01(self, dev):
+        """CHEM-01 only from a reading newer than the one published last time: when no new records arrive (the
+        driver or the node is down), nothing is published rather than the same old reading again."""
+        t = dev.last_record["time_ms"]
+        if t == dev.last_chem01_ms:
+            if not dev.chem01_stale_warned:
+                log.warning("%s CHEM-01: no new reading since %s, not published", dev.device_id, utc_iso(t / 1000.0))
+                dev.chem01_stale_warned = True
+            return False
+        dev.last_chem01_ms, dev.chem01_stale_warned = t, False
+        self.publish_chem01(dev)
+        return True
+
     def publish_chem01(self, dev):
         r, st = dev.last_record, dev.status
         flags = r["flags"]
@@ -656,6 +670,8 @@ class HwInterface:
         body = self.common(dev, "IMG-02", t)
         body.update({"path": rel, "content_type": "image/jpeg", "size": size, "sha256": sha, "event_id": event_id,
                      "part": part, "trigger": trigger, "command_id": cmd_id, "width": w, "height": h})
+        if event is None and node_id.startswith("E") and not self.ledger.event_known(dev.device_id, node_id):
+            body["late"] = True                          # a picture the node kept during an outage
         self.publish(dev, "file/IMG-02", body)
         self.notify(dev, "IMG-03", event_id, "record", command_id=cmd_id, part=part, path=rel, size=size)
         if ctx and ctx.get("kind") == "command":
@@ -664,7 +680,7 @@ class HwInterface:
     def on_event_audio(self, dev, e):
         """A clip the node recorded itself while the server was unreachable (32 MB boards)."""
         node_id = e.get("event_id") or ""
-        data = self.driver.download(e["url"])
+        data = wav_to_pcm16(self.driver.download(e["url"]))    # the node keeps clips as A-law: PCM like all ACO files
         event_id = node_id or None
         ev = dev.event if dev.event and dev.event.node_event_id == node_id else None
         t0 = (ev.start_t - 2) if ev else (e.get("ts") or time.time()) - 5
@@ -677,7 +693,8 @@ class HwInterface:
         body = self.common(dev, "ACO-02", t0)
         body.update({"path": rel, "content_type": "audio/wav", "size": size, "sha256": sha, "event_id": event_id,
                      "part": part, "trigger": "event", "command_id": None, "recorded_from": utc_iso(t0),
-                     "recorded_to": utc_iso(t0 + 5), "time_accuracy_ms": 60000, "recorded_by": "node"})
+                     "recorded_to": utc_iso(t0 + 5), "time_accuracy_ms": 60000, "recorded_by": "node",
+                     "late": True})                       # kept by the node during an outage
         self.publish(dev, "file/ACO-02", body)
 
     # ------------------------------------------------------------------ event-log recovery

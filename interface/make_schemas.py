@@ -106,7 +106,7 @@ SCHEMAS = dict([
         "path": path_for("wav"), "content_type": {"const": "audio/wav"},
         "event_id": EVENT_ID_OR_NULL, "part": {"type": "integer", "minimum": 1}, "trigger": TRIGGER,
         "command_id": {"type": ["string", "null"]}, "time_accuracy_ms": {"type": "integer", "minimum": 0},
-        "recorded_by": {"enum": ["edge", "node"]}, "gaps_ms": {"type": "integer", "minimum": 1}}),
+        "recorded_by": {"enum": ["edge", "node"]}, "gaps_ms": {"type": "integer", "minimum": 1}, "late": BOOL}),
         ["path", "content_type", "size", "sha256", "event_id", "part", "trigger", "command_id",
          "recorded_from", "recorded_to", "time_accuracy_ms", "recorded_by"]),
     schema("file-IMG-01", "Image baseline file ready (IMG-01)", "IMG-01", dict(FILE_COMMON, **{
@@ -117,7 +117,7 @@ SCHEMAS = dict([
     schema("file-IMG-02", "Image event file ready (IMG-02)", "IMG-02", dict(FILE_COMMON, **{
         "path": path_for("jpg"), "content_type": {"const": "image/jpeg"},
         "event_id": EVENT_ID_OR_NULL, "part": {"type": "integer", "minimum": 1}, "trigger": TRIGGER,
-        "command_id": {"type": ["string", "null"]}, "width": INT_OR_NULL, "height": INT_OR_NULL}),
+        "command_id": {"type": ["string", "null"]}, "width": INT_OR_NULL, "height": INT_OR_NULL, "late": BOOL}),
         ["path", "content_type", "size", "sha256", "event_id", "part", "trigger", "command_id", "width", "height"]),
     schema("event-CHEM-03", "Node-triggered event notification (CHEM-03)", "CHEM-03", {
         "event_id": EVENT_ID, "notification": {"enum": ["start", "record", "end"]},
