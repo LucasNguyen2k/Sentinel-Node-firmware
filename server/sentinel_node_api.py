@@ -1030,6 +1030,11 @@ class Registry:
             dev = self._devices.get(ip)
             if dev:
                 dev.update_identity(node_id, fw)
+                if name and name != dev.name:
+                    # the node was renamed (SET name, SAVE, REBOOT): take the new name over. Its data folder keeps the
+                    # old name while in use (the recorder writes into it); the next driver start uses the new one.
+                    log.info("Node %s renamed: %s -> %s", ip, dev.name, name)
+                    dev.name = name
                 return dev, False
             dev = Device(ip, name)
             dev.update_identity(node_id, fw)
