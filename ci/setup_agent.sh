@@ -139,6 +139,11 @@ if [ "$ROLE" = edge ]; then
   if id "$JENKINS_USER" >/dev/null 2>&1; then
     run usermod -aG dialout "$JENKINS_USER"                 # only used if a board's serial port is attached here
     run install -m 0755 -o root -g root "$REPO/ci/hil/sentinel-deploy.sh" /usr/local/sbin/sentinel-deploy
+    # an older setup wrote the previous, narrower rule to sentinel-ci: remove it (only if it is that rule)
+    LEGACY=/etc/sudoers.d/sentinel-ci
+    if [ -f "$LEGACY" ] && grep -q "sentinel_node_api.py /opt/sentinel-edge" "$LEGACY" 2>/dev/null; then
+      if [ "$DRY_RUN" = 1 ]; then echo "  would remove the old rule file $LEGACY"; else rm -f "$LEGACY"; echo "  removed the old rule file $LEGACY"; fi
+    fi
     SUDOERS="$JENKINS_USER ALL=(root) NOPASSWD: /usr/local/sbin/sentinel-deploy, /usr/bin/journalctl -u sentinel-edge *, /usr/bin/journalctl -u sentinel-hw-interface *"
     if [ "$DRY_RUN" = 1 ]; then
       echo "  would write /etc/sudoers.d/sentinel-edge-ci: $SUDOERS"
