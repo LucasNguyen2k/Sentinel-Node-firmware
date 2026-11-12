@@ -129,6 +129,7 @@ class HwInterface:
         if self.s.mqtt_user:
             self.mq.username_pw_set(self.s.mqtt_user, self.s.mqtt_pass)
         self.mq.on_connect = self._on_connect
+        self.mq.on_disconnect = self._on_disconnect
         self.mq.on_message = self._on_message
         self.connected = threading.Event()
 
@@ -138,6 +139,15 @@ class HwInterface:
             client.subscribe("sentinel/v1/+/cmd/+", qos=1)
             self.connected.set()
             log.info("MQTT connected")
+        else:
+            log.error("MQTT connection refused: %s", reason_code)
+
+    def _on_disconnect(self, client, userdata, flags, reason_code, properties):
+        self.connected.clear()
+        if self.stop.is_set():
+            log.info("MQTT disconnected (shutdown)")
+        else:                                        # paho reconnects by itself; sentinel-status reads this line
+            log.warning("MQTT disconnected (%s); reconnecting", reason_code)
 
     def _on_message(self, client, userdata, msg):
         parts = msg.topic.split("/")

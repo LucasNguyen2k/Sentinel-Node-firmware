@@ -138,12 +138,19 @@ if [ "$ROLE" = edge ]; then
   run systemctl enable sentinel-edge sentinel-hw-interface
   if id "$JENKINS_USER" >/dev/null 2>&1; then
     run usermod -aG dialout "$JENKINS_USER"                 # only used if a board's serial port is attached here
-    SUDOERS="$JENKINS_USER ALL=(root) NOPASSWD: /usr/bin/systemctl restart sentinel-edge, /usr/bin/install -m 0644 server/sentinel_node_api.py /opt/sentinel-edge/sentinel_node_api.py, /usr/bin/journalctl -u sentinel-edge -n 50 --no-pager"
+    run install -m 0755 -o root -g root "$REPO/ci/hil/sentinel-deploy.sh" /usr/local/sbin/sentinel-deploy
+    SUDOERS="$JENKINS_USER ALL=(root) NOPASSWD: /usr/local/sbin/sentinel-deploy, /usr/bin/journalctl -u sentinel-edge *, /usr/bin/journalctl -u sentinel-hw-interface *"
     if [ "$DRY_RUN" = 1 ]; then
       echo "  would write /etc/sudoers.d/sentinel-edge-ci: $SUDOERS"
     else
-      echo "$SUDOERS" > /etc/sudoers.d/sentinel-edge-ci && chmod 0440 /etc/sudoers.d/sentinel-edge-ci
-      visudo -cf /etc/sudoers.d/sentinel-edge-ci >/dev/null
+      # validate a copy first: an invalid file in /etc/sudoers.d would break sudo on the whole machine
+      tmp=$(mktemp) && echo "$SUDOERS" > "$tmp" && chmod 0440 "$tmp"
+      if visudo -cf "$tmp" >/dev/null; then
+        install -m 0440 -o root -g root "$tmp" /etc/sudoers.d/sentinel-edge-ci
+      else
+        echo "ERROR: the sudoers rule did not validate; /etc/sudoers.d left unchanged" >&2; rm -f "$tmp"; exit 1
+      fi
+      rm -f "$tmp"
     fi
   fi
   PROFILE_EXTRA=""

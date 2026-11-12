@@ -10,7 +10,7 @@ pipeline {
         booleanParam(name: 'RUN_MUTATION', defaultValue: false, description: 'Run the firmware mutation check')
         booleanParam(name: 'HIL_DESTRUCTIVE', defaultValue: true, description: 'Allow reboot / power-mode tests on the bench')
         booleanParam(name: 'FLASH_NODE', defaultValue: true, description: 'Flash this build onto the bench node first (needs an x86-64 agent labelled sentinel-flash with the board on USB)')
-        string(name: 'HIL_NODE_IP', defaultValue: '192.168.100.44', description: 'IP address of the bench node')
+        string(name: 'HIL_NODE_IP', defaultValue: '192.168.100.29', description: 'IP address of the bench node (the board on USB of the sentinel-flash agent)')
         string(name: 'FLASH_SERIAL_PORT', defaultValue: '/dev/ttyUSB0', description: 'USB serial port of the bench node on the sentinel-flash agent')
         string(name: 'HIL_SERIAL_PORT', defaultValue: '', description: 'USB serial port of the bench node on the sentinel-hil agent, for the boot-log test; empty if the board is not attached there')
         string(name: 'SOAK_MINUTES', defaultValue: '5', description: 'Data-socket stability window on the bench')
@@ -79,6 +79,9 @@ pipeline {
                                          keepAll: true, alwaysLinkToLastBuild: true, allowMissing: true])
                     stash name: 'results', includes: 'build/firmware/results.json, build/fw_host/results/*.json, build/server/results.json, build/hil/results.json', allowEmpty: true
                     stash name: 'firmware', includes: 'build/firmware/default/**', allowEmpty: true
+                    // the hardware stages use exactly these sources (no new checkout on the bench machines)
+                    stash name: 'src', includes: 'server/**, hw_interface/**, tools/**, tests/**, ci/**, interface/**, firmware/sentinel_node/**',
+                          excludes: '**/__pycache__/**'
                 }
             }
         }
@@ -93,7 +96,10 @@ pipeline {
             stages {
                 stage('Deploy Edge Server') {
                     agent { label 'sentinel-hil' }
+                    options { skipDefaultCheckout() }
                     steps {
+                        deleteDir()
+                        unstash 'src'
                         withCredentials([string(credentialsId: 'sentinel-api-key', variable: 'AMB82_API_KEY')]) {
                             sh '. /etc/profile.d/sentinel-ci.sh; ci/hil/deploy_edge_server.sh'
                         }
@@ -102,14 +108,20 @@ pipeline {
                 stage('Flash bench node') {
                     when { beforeAgent true; expression { params.FLASH_NODE } }
                     agent { label 'sentinel-flash && x86_64' }
+                    options { skipDefaultCheckout() }
                     steps {
+                        deleteDir()
+                        unstash 'src'
                         unstash 'firmware'
                         sh "ci/hil/flash_node.sh build/firmware/default/build ${params.FLASH_SERIAL_PORT}"
                     }
                 }
                 stage('Hardware suite') {
                     agent { label 'sentinel-hil' }
+                    options { skipDefaultCheckout() }
                     steps {
+                        deleteDir()
+                        unstash 'src'
                         unstash 'results'
                         withCredentials([string(credentialsId: 'sentinel-api-key', variable: 'AMB82_API_KEY')]) {
                             sh """. /etc/profile.d/sentinel-ci.sh

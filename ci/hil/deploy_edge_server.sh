@@ -1,16 +1,23 @@
 #!/usr/bin/env bash
-# deploy_edge_server.sh - install this build's Edge Server on the bench and restart it.
-# The bench runs the server as systemd unit "sentinel-edge" (ci/hil/sentinel-edge.service). The Jenkins user
-# needs:  jenkins ALL=(root) NOPASSWD: /usr/bin/systemctl restart sentinel-edge, /usr/bin/install
+# deploy_edge_server.sh - install this build's Edge Server (SN Device Driver, HW Interface, sentinel-status) on
+# the bench and restart both services. The Jenkins user runs the root-owned /usr/local/sbin/sentinel-deploy
+# through sudo (set up by ci/setup_agent.sh); the settings in /etc/sentinel-*.env stay as they are.
 set -euo pipefail
-sudo /usr/bin/install -m 0644 server/sentinel_node_api.py /opt/sentinel-edge/sentinel_node_api.py
-sudo /usr/bin/systemctl restart sentinel-edge
+since=$(date '+%Y-%m-%d %H:%M:%S')
+sudo /usr/local/sbin/sentinel-deploy "$PWD"
 for i in $(seq 1 30); do
   if curl -fs -H "X-API-Key: ${AMB82_API_KEY}" http://127.0.0.1:8080/api/v1/devices >/dev/null; then
-    echo "Edge Server up"; exit 0
+    echo "SN Device Driver up"; break
+  fi
+  [ "$i" = 30 ] && { echo "SN Device Driver did not come up" >&2; sudo journalctl -u sentinel-edge -n 50 --no-pager || true; exit 1; }
+  sleep 1
+done
+for i in $(seq 1 30); do
+  if sudo journalctl -u sentinel-hw-interface --since "$since" --no-pager | grep -q "MQTT connected"; then
+    echo "HW Interface up (MQTT connected)"; exit 0
   fi
   sleep 1
 done
-echo "Edge Server did not come up" >&2
-sudo journalctl -u sentinel-edge -n 50 --no-pager || true
+echo "HW Interface did not connect to MQTT" >&2
+sudo journalctl -u sentinel-hw-interface -n 50 --no-pager || true
 exit 1

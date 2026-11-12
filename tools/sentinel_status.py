@@ -277,8 +277,16 @@ def journal_summary(unit, since):
         return "journal not readable (run with sudo)", INFO
     lines = out.splitlines()
     warns = [l for l in lines if " WARNING " in l or " ERROR " in l or "Traceback" in l]
-    _, all_out = sh(["journalctl", "-u", unit, "-n", "300", "--no-pager", "-o", "cat"])
-    mqtt_ok = "MQTT connected" in all_out
+    # the connection state = the last connect / disconnect line since the service started (not only recent lines:
+    # after days of running the start-up "MQTT connected" is long gone from the tail of the log)
+    span = ["--since", "-%ds" % (int(since) + 5)] if since else ["-n", "5000"]
+    _, all_out = sh(["journalctl", "-u", unit, "--no-pager", "-o", "cat"] + span, timeout=15)
+    states = re.findall(r"MQTT (connected|disconnected|connection refused)", all_out)
+    if states:
+        mqtt_ok = states[-1] == "connected"
+    else:                                            # log rotated away: is there a live connection to the broker?
+        _, socks = sh(["ss", "-tnpH", "state", "established", "( dport = :1883 )"])
+        mqtt_ok = "python" in socks
     text = ("MQTT connected" if mqtt_ok else "MQTT not connected") + " · %d warning%s (10 min)" % (
         len(warns), "" if len(warns) == 1 else "s")
     if warns:
