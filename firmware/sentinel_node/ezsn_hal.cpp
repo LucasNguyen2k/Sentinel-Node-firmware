@@ -648,6 +648,17 @@ static String ezhal_hex(const uint8_t *b, int n)
     return s;
 }
 
+// Flash size in bytes from the JEDEC capacity byte (the third byte of READ ID). Up to 0x1F the code is the power of
+// two of the size (0x18 = 16 MB, 0x19 = 32 MB). From 0x20 the vendors continue in steps: 0x20 = 512 Mbit (64 MB),
+// 0x21 = 1 Gbit (128 MB), 0x22 = 2 Gbit (256 MB) -- not 2^32 bytes, which would not fit in 32 bits either.
+// Unknown codes give 0 ("size unknown").
+static uint32_t ezhal_jedec_capacity(uint8_t code)
+{
+    if (code >= 0x10 && code <= 0x1F) return 1u << code;
+    if (code >= 0x20 && code <= 0x22) return (64u * 1024u * 1024u) << (code - 0x20);
+    return 0;
+}
+
 HalStatus ezhal_flash_probe(bool write_test, String *report)
 {
     const uint32_t SCR_OFF = EZHAL_FLASH_SCRATCH;               // 0xFD3000 in either 16 MB half
@@ -657,7 +668,7 @@ HalStatus ezhal_flash_probe(bool write_test, String *report)
     String r = "";
 
     flash_read_id(&g_flash, id, 3);
-    uint32_t size = (id[2] >= 0x10 && id[2] <= 0x20) ? (1u << id[2]) : 0;
+    uint32_t size = ezhal_jedec_capacity(id[2]);
     r += "jedec=" + ezhal_hex(id, 3) + " (" + ezhal_flash_vendor(id[0]) + ", " +
          (size ? String(size / (1024u * 1024u)) + " MB" : String("size unknown")) + ")\n";
     int ear0 = flash_get_extend_addr(&g_flash);
@@ -746,7 +757,7 @@ uint32_t ezhal_flash_size()
     if (size == 0xFFFFFFFFu) {
         uint8_t id[3] = {0, 0, 0};
         flash_read_id(&g_flash, id, 3);
-        size = (id[2] >= 0x10 && id[2] <= 0x20) ? (1u << id[2]) : 0;
+        size = ezhal_jedec_capacity(id[2]);
     }
     return size;
 }
