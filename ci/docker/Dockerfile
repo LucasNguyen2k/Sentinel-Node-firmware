@@ -18,10 +18,14 @@ ENV DEBIAN_FRONTEND=noninteractive \
 RUN apt-get update && apt-get install -y --no-install-recommends \
         python3 python3-pip g++ make git curl ca-certificates bzip2 xz-utils zip unzip cppcheck pyflakes3 mosquitto ffmpeg \
     && rm -rf /var/lib/apt/lists/*
-RUN curl -fsSL https://github.com/arduino/arduino-cli/releases/download/v${ARDUINO_CLI_VERSION}/arduino-cli_${ARDUINO_CLI_VERSION}_Linux_64bit.tar.gz \
+# GitHub's raw file server sometimes drops large downloads (the toolchains are ~85 MB each): retry 3 times
+RUN curl -fsSL --retry 3 --retry-delay 10 https://github.com/arduino/arduino-cli/releases/download/v${ARDUINO_CLI_VERSION}/arduino-cli_${ARDUINO_CLI_VERSION}_Linux_64bit.tar.gz \
         | tar -xz -C /usr/local/bin arduino-cli \
-    && arduino-cli core update-index \
-    && arduino-cli core install realtek:AmebaPro2@${AMEBA_CORE_VERSION}
+    && for i in 1 2 3; do arduino-cli core update-index && break; echo "index download failed, retry $i"; sleep 15; done \
+    && for i in 1 2 3; do \
+         arduino-cli core install realtek:AmebaPro2@${AMEBA_CORE_VERSION} && exit 0; \
+         echo "toolchain download failed (attempt $i of 3)"; sleep 15; \
+       done; exit 1
 RUN mkdir -p /opt/arduino/libraries && cd /opt/arduino/libraries \
     && git clone https://github.com/lasselukkari/aWOT && git -C aWOT checkout ${AWOT_COMMIT}
 COPY server/requirements.txt /tmp/server-requirements.txt
