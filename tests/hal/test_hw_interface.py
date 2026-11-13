@@ -44,7 +44,7 @@ def test_heartbeat(bench):
 
 def test_chem01_baseline(bench):
     gw = bench.gw
-    msgs = gw.wait_for(lambda: len(gw.by_topic("data/CHEM-01", DEVICE_ID)) >= 2 and gw.by_topic("data/CHEM-01", DEVICE_ID), 15, "CHEM-01")
+    msgs = gw.wait_for(lambda: len(gw.by_topic("data/CHEM-01", DEVICE_ID)) >= 4 and gw.by_topic("data/CHEM-01", DEVICE_ID), 20, "CHEM-01")
     m = msgs[-1]
     t_ms, temp, rh, mos = m["sensor_values"].split(",")
     assert int(t_ms) == m["fields"]["time_ms"] and abs(int(t_ms) / 1000 - time.time()) < 10
@@ -55,8 +55,14 @@ def test_chem01_baseline(bench):
                       "mos_resolution_mv"}
     assert q["sensor_ok"] and q["temp_rh_ok"] and q["time_synced"] and not q["simulated"]
     assert "gas_ppm" not in m                         # emulator is not calibrated: no concentration
-    gap = ISO(msgs[-1]["timestamp"]) - ISO(msgs[-2]["timestamp"])
-    assert 1.0 <= gap <= 4.0                          # every chem01_s (2 s in this bench)
+    # published every chem01_s (2 s in this bench): measured by arrival, because "timestamp" is the time of the
+    # reading, and the latest reading at publication can be fresh or a little older (records arrive in batches)
+    arrived = gw.arrival_times("data/CHEM-01", DEVICE_ID)[-4:]
+    gaps = [b - a for a, b in zip(arrived, arrived[1:])]
+    assert all(1.5 <= g <= 3.0 for g in gaps), gaps
+    # and every CHEM-01 carries a newer reading than the one before (never the same reading again)
+    times = [m["fields"]["time_ms"] for m in msgs[-4:]]
+    assert times == sorted(set(times)), times
 
 
 def test_baseline_audio_and_picture(bench):

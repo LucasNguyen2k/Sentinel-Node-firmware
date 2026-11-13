@@ -42,6 +42,7 @@ class NodeGatewayEmu:
                            for t in index["topics"]]
         self.lock = threading.Lock()
         self.messages = []              # (topic, body)
+        self.arrived = []               # arrival time (time.time()) of each message, same order as self.messages
         self.schema_errors = []         # (topic, message)
         self.file_errors = []           # (path, problem)
         self.files = {}                 # path -> body of its "file ready" message
@@ -78,6 +79,7 @@ class NodeGatewayEmu:
         errs = ["no schema for topic"] if v is None else [e.message for e in v[1].iter_errors(body)]
         with self.lock:
             self.messages.append((msg.topic, body))
+            self.arrived.append(time.time())
             if msg.retain:
                 self.retained[msg.topic] = body
             for e in errs:
@@ -174,6 +176,11 @@ class NodeGatewayEmu:
                 return v
             time.sleep(step)
         raise AssertionError("timed out after %.0f s waiting for %s" % (timeout, what))
+
+    def arrival_times(self, suffix, device_id=None):
+        """When the messages by_topic(suffix, device_id) returns arrived here, in the same order."""
+        return [a for (t, b), a in zip(self.messages, self.arrived)
+                if t.endswith("/" + suffix) and (device_id is None or b.get("device_id") == device_id)]
 
     def by_topic(self, suffix, device_id=None):
         return [b for t, b in self.messages if t.endswith("/" + suffix) and (device_id is None or b.get("device_id") == device_id)]
