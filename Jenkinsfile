@@ -101,7 +101,7 @@ pipeline {
                         deleteDir()
                         unstash 'src'
                         withCredentials([string(credentialsId: 'sentinel-api-key', variable: 'AMB82_API_KEY')]) {
-                            sh '. /etc/profile.d/sentinel-ci.sh; ci/hil/deploy_edge_server.sh'
+                            sh '. /etc/profile.d/sentinel-ci.sh; bash ci/hil/deploy_edge_server.sh'   // bash: works without the executable bit (lost by stash/unstash)
                         }
                     }
                 }
@@ -113,7 +113,7 @@ pipeline {
                         deleteDir()
                         unstash 'src'
                         unstash 'firmware'
-                        sh "ci/hil/flash_node.sh build/firmware/default/build ${params.FLASH_SERIAL_PORT}"
+                        sh "bash ci/hil/flash_node.sh build/firmware/default/build ${params.FLASH_SERIAL_PORT}"
                     }
                 }
                 stage('Hardware suite') {
