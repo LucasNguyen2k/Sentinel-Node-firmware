@@ -33,3 +33,7 @@ COPY tests/requirements.txt /tmp/test-requirements.txt
 RUN pip3 install --break-system-packages -r /tmp/server-requirements.txt -r /tmp/test-requirements.txt
 # Jenkins runs the container with its own UID: the toolchain folders must be writable for it
 RUN mkdir -p /opt/arduino-cache && chmod -R a+rwX /opt/arduino15 /opt/arduino /opt/arduino-cache
+# The Realtek core's first build hook runs `chmod -R 777` on its tools folder, which only the owner (root) may do.
+# Do it here once, as root, and replace the hook by `true` for the builds (ci/build_matrix.py reads this variable).
+RUN chmod -R 777 /opt/arduino15/packages/realtek/tools
+ENV ARDUINO_EXTRA_PROPS="recipe.hooks.prebuild.1.pattern.linux=true"

@@ -51,6 +51,17 @@ def main():
     cli = os.environ.get("ARDUINO_CLI", "arduino-cli")
     extra = [p for p in os.environ.get("ARDUINO_EXTRA_PROPS", "").split(";") if p.strip()]
     sketch_src = os.path.join(repo, "firmware", "sentinel_node")
+    # Realtek's build tools (ino_validation_linux, ...) look for the core in $HOME/.arduino15, whatever arduino-cli's
+    # data directory is: give the builds a home whose .arduino15 points to the real data directory
+    home = os.path.join(out, ".arduino-home")
+    os.makedirs(home, exist_ok=True)
+    link = os.path.join(home, ".arduino15")
+    data = arduino_data_dir(cli)
+    if data and os.path.realpath(link) != os.path.realpath(data):
+        if os.path.lexists(link):
+            os.remove(link)
+        os.symlink(data, link)
+    cli_env = dict(os.environ, HOME=home)
     results = []
     for v in cfg["variants"]:
         if args.only and v["name"] not in args.only.split(","):
@@ -76,7 +87,7 @@ def main():
                 cmd += ["--build-property", p]
             cmd.append(sketch)
             t0 = time.time()
-            r = subprocess.run(cmd, capture_output=True, text=True)
+            r = subprocess.run(cmd, capture_output=True, text=True, env=cli_env)
             log = r.stdout + r.stderr
             open(os.path.join(work, "compile.log"), "w").write(log)
             warnings = sorted(set(re.findall(OWN_FILES + r".*", log)))
@@ -117,6 +128,10 @@ def main():
                         "message": msg, "size": size, "warnings": len(warnings)})
         print("[%s] %-18s %s %s" % ("  OK  " if status == "passed" else " FAIL ", name,
                                      ("size=" + size) if size else "", msg.splitlines()[0] if msg else ""))
+        if status != "passed" and log:
+            # the cause, right in the console (the whole output is in <variant>/compile.log, archived by Jenkins)
+            tail = [l for l in log.splitlines() if l.strip()][-12:]
+            print("\n".join("         | " + l for l in tail) if tail else "         | (arduino-cli printed nothing)")
     with open(os.path.join(out, "results.json"), "w") as f:
         json.dump(results, f, indent=1)
     bad = [r for r in results if r["outcome"] != "passed"]

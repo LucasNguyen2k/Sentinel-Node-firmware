@@ -86,6 +86,11 @@ if [ "$ROLE" = build ]; then
   PROFILE_EXTRA="export ARDUINO_DIRECTORIES_DATA=/opt/arduino15 ARDUINO_DIRECTORIES_USER=/opt/arduino
 export ARDUINO_BOARD_MANAGER_ADDITIONAL_URLS=$ARDUINO_BOARD_MANAGER_ADDITIONAL_URLS"
   OWNED="/opt/arduino15 /opt/arduino /opt/sentinel-venv"
+  # Realtek's tools look for the core in $HOME/.arduino15: point the jenkins user's there (flash stage, upload tool)
+  JHOME=$(getent passwd "$JENKINS_USER" | cut -d: -f6)
+  if [ -n "$JHOME" ] && [ ! -e "$JHOME/.arduino15" ]; then
+    run ln -s /opt/arduino15 "$JHOME/.arduino15"
+  fi
 fi
 
 # ---- edge role: Edge Server service + rights for the pipeline -----------------------------------
