@@ -79,16 +79,25 @@ def main():
                 status, msg = "error", "edit pattern %r found %d times in %s" % (old, s.count(old), fname)
                 break
             open(p, "w", encoding="utf-8").write(s.replace(old, new))
-        log, warnings, size = "", [], ""
+        log, warnings, size, retried = "", [], "", None
         if status == "passed":
             fqbn = cfg["fqbn"] + ((":" + v["options"]) if v.get("options") else "")
-            cmd = [cli, "compile", "-b", fqbn, "--warnings", "all", "--build-path", os.path.join(work, "build")]
+            # -v: every command is logged, so a crash shows which program it was (compile.log, console tail)
+            cmd = [cli, "compile", "-v", "-b", fqbn, "--warnings", "all", "--build-path", os.path.join(work, "build")]
             for p in extra:
                 cmd += ["--build-property", p]
             cmd.append(sketch)
             t0 = time.time()
             r = subprocess.run(cmd, capture_output=True, text=True, env=cli_env)
             log = r.stdout + r.stderr
+            crash = re.search(r"Error during build: signal: ([^\n]*)", log)
+            if r.returncode != 0 and crash:
+                # a tool killed by a signal (seen once: a segmentation fault): retry once; an ordinary compile
+                # error is never retried, and a crash that repeats still fails
+                first = crash.group(1).strip()
+                r = subprocess.run(cmd, capture_output=True, text=True, env=cli_env)
+                log = ("=== first attempt crashed (%s); retried ===\n" % first) + r.stdout + r.stderr
+                retried = first
             open(os.path.join(work, "compile.log"), "w").write(log)
             warnings = sorted(set(re.findall(OWN_FILES + r".*", log)))
             m = re.search(r"Sketch uses (\d+) bytes", log)
@@ -128,6 +137,8 @@ def main():
                         "message": msg, "size": size, "warnings": len(warnings)})
         print("[%s] %-18s %s %s" % ("  OK  " if status == "passed" else " FAIL ", name,
                                      ("size=" + size) if size else "", msg.splitlines()[0] if msg else ""))
+        if status == "passed" and retried:
+            print("         | note: crashed once (%s), passed on retry" % retried)
         if status != "passed" and log:
             # the cause, right in the console (the whole output is in <variant>/compile.log, archived by Jenkins)
             tail = [l for l in log.splitlines() if l.strip()][-12:]
