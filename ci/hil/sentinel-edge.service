@@ -1,6 +1,6 @@
 # /etc/systemd/system/sentinel-edge.service - Edge Server on the HIL bench (and in production)
 [Unit]
-Description=EyeZense Sentinel Node Edge Server
+Description=Sentinel Node Device Driver
 After=network-online.target
 Wants=network-online.target
 
