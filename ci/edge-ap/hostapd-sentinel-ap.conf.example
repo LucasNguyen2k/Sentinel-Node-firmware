@@ -1,0 +1,20 @@
+# /etc/hostapd/sentinel-ap.conf - the nodes' access point. Every Edge Server needs its OWN ssid: nodes join any
+# access point whose name and password they know, and register with the server behind it.
+interface=wlan1
+bridge=br0
+driver=nl80211
+ssid=camera_demo
+# your country (two letters): sets the legal channels and power
+country_code=US
+hw_mode=g
+# 1, 6 or 11; use another channel than the other Edge Server near by
+channel=11
+ieee80211n=1
+wmm_enabled=1
+auth_algs=1
+wpa=2
+wpa_key_mgmt=WPA-PSK
+rsn_pairwise=CCMP
+# 8 to 63 characters. With the firmware's default (12345678), boards without saved settings join this
+# access point by themselves - convenient on the bench, but weak and published: never on a site.
+wpa_passphrase=change-this-passphrase

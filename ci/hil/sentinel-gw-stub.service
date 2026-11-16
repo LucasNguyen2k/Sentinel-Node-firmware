@@ -1,0 +1,19 @@
+# Sentinel node-gateway stub: stands in for the software team's consumer. Subscribes to sentinel/v1, checks every
+# message against the JSON Schemas and every announced file in the data area, and logs a summary every minute
+# (journalctl -u sentinel-gw-stub). Installed by: sudo SENTINEL_GW_STUB=1 ci/setup_agent.sh
+[Unit]
+Description=Sentinel node-gateway stub (sentinel/v1 consumer emulator)
+After=network-online.target mosquitto.service sentinel-hw-interface.service
+Wants=mosquitto.service
+
+[Service]
+Type=simple
+User=sentinel
+Group=sentinel
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/opt/sentinel-venv/bin/python /opt/sentinel-gw-stub/tests/common/node_gateway_emu.py --data-root /var/lib/sentinel/data-area --show --every 60 --keep 20000
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

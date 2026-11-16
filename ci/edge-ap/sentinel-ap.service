@@ -1,0 +1,14 @@
+# Starts the nodes' Wi-Fi access point (sentinel-ap.sh) at boot, before the Edge Server services.
+[Unit]
+Description=Sentinel Wi-Fi access point for the nodes (br0 192.168.100.1)
+After=network.target sys-subsystem-net-devices-wlan0.device
+Wants=sys-subsystem-net-devices-wlan0.device
+Before=sentinel-edge.service sentinel-hw-interface.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/local/sbin/sentinel-ap
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,6 @@
+# /etc/dnsmasq.d/sentinel.conf - addresses for the nodes on br0
+interface=br0
+bind-interfaces
+# DHCP only: no DNS service, so no clash with systemd-resolved on port 53
+port=0
+dhcp-range=192.168.100.20,192.168.100.200,255.255.255.0,12h

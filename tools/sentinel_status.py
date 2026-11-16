@@ -22,6 +22,7 @@ import urllib.request
 OK, WARN, FAIL, INFO = "ok", "warn", "fail", "info"
 EDGE_ENV, HWI_ENV = "/etc/sentinel-edge.env", "/etc/sentinel-hw-interface.env"
 LEASES = ("/var/lib/misc/dnsmasq.leases", "/var/lib/dnsmasq/dnsmasq.leases")
+NM_LEASES = "/var/lib/NetworkManager/dnsmasq-*.leases"     # NetworkManager hotspot ("shared" mode)
 
 
 # ---------------------------------------------------------------------------------------------- helpers
@@ -113,6 +114,22 @@ class Report:
 
 
 # ---------------------------------------------------------------------------------------------- checks
+def nm_hotspot():
+    """The active NetworkManager Wi-Fi connection in access-point mode, or None."""
+    if not shutil.which("nmcli"):
+        return None
+    _, active = sh(["nmcli", "-t", "-f", "NAME,TYPE,DEVICE", "connection", "show", "--active"])
+    for line in active.splitlines():
+        parts = line.rsplit(":", 2)                      # names may contain ':'
+        if len(parts) == 3 and parts[1] == "802-11-wireless":
+            _, info = sh(["nmcli", "-g", "802-11-wireless.mode,802-11-wireless.ssid,802-11-wireless.channel",
+                          "connection", "show", parts[0]])
+            fields = info.splitlines() + ["", "", ""]
+            if fields[0].strip() == "ap":
+                return {"name": parts[0], "device": parts[2], "ssid": fields[1].strip(), "channel": fields[2].strip()}
+    return None
+
+
 def check_wifi(r):
     r.section("WI-FI ACCESS POINT")
     _, procs = sh(["pgrep", "-a", "hostapd"])
@@ -142,18 +159,24 @@ def check_wifi(r):
             detail += " · channel " + conf["channel"]
         r.add(OK, "hostapd", "running · " + detail)
     else:
-        r.add(FAIL, "hostapd", "not running: the nodes have no Wi-Fi (start your access-point script)")
-    _, addr = sh(["ip", "-4", "-o", "addr", "show", "br0"])
-    m = re.search(r"inet (\S+)", addr)
-    if m and m.group(1).startswith("192.168.100.1/"):
-        r.add(OK, "br0", m.group(1))
-    elif m:
-        r.add(WARN, "br0", "%s (expected 192.168.100.1/24)" % m.group(1))
+        hotspot = nm_hotspot()                         # e.g. a Raspberry Pi 5: NetworkManager's hotspot mode
+        if hotspot:
+            iface = hotspot["device"] or iface
+            r.add(OK, "hotspot", 'NetworkManager · SSID "%s" · %s%s' % (
+                hotspot["ssid"], iface, " · channel " + hotspot["channel"] if hotspot["channel"] not in ("", "0") else ""))
+            procs = "nm"
+        else:
+            r.add(FAIL, "access point", "neither hostapd nor a NetworkManager hotspot is running: the nodes have no Wi-Fi")
+    # the nodes' network: whichever interface holds 192.168.100.1 (br0 with hostapd, wlan0 with a hotspot)
+    _, addrs = sh(["ip", "-4", "-o", "addr", "show"])
+    hit = re.search(r"^\d+:\s+(\S+)\s+inet (192\.168\.100\.1/\d+)", addrs, re.M)
+    if hit:
+        r.add(OK, hit.group(1), hit.group(2))
     else:
-        r.add(FAIL, "br0", "no address: the SN Device Driver cannot listen on 192.168.100.1")
+        r.add(FAIL, "192.168.100.1", "on no interface: the nodes cannot reach the SN Device Driver")
     state, _ = service("dnsmasq")
     leases = []
-    for path in LEASES:
+    for path in list(LEASES) + sorted(glob.glob(NM_LEASES)):
         try:
             leases = [l.split() for l in open(path) if l.strip()]
             break

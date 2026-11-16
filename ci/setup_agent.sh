@@ -13,6 +13,7 @@
 #
 #   sudo ci/setup_agent.sh                              (role from the CPU type)
 #   sudo SENTINEL_AGENT_ROLE=edge ci/setup_agent.sh     (force a role)
+#   sudo SENTINEL_GW_STUB=1 ci/setup_agent.sh            (edge role: also install the node-gateway stub service)
 #   DRY_RUN=1 ci/setup_agent.sh                         (print what would be done, change nothing)
 set -euo pipefail
 ARDUINO_CLI_VERSION=1.3.1
@@ -141,6 +142,16 @@ if [ "$ROLE" = edge ]; then
   fi
   run systemctl daemon-reload
   run systemctl enable sentinel-edge sentinel-hw-interface
+  # optional node-gateway stub (a consumer emulator, e.g. on a second Edge Server): SENTINEL_GW_STUB=1
+  if [ "${SENTINEL_GW_STUB:-0}" = 1 ]; then
+    run install -d -m 0755 /opt/sentinel-gw-stub/tests/common /opt/sentinel-gw-stub/interface/schemas
+    run install -m 0644 "$REPO/tests/common/node_gateway_emu.py" /opt/sentinel-gw-stub/tests/common/node_gateway_emu.py
+    run rm -rf /opt/sentinel-gw-stub/interface/schemas/sentinel-v1
+    run cp -r "$REPO/interface/schemas/sentinel-v1" /opt/sentinel-gw-stub/interface/schemas/sentinel-v1
+    run install -m 0644 "$REPO/ci/hil/sentinel-gw-stub.service" /etc/systemd/system/sentinel-gw-stub.service
+    run systemctl daemon-reload
+    run systemctl enable sentinel-gw-stub
+  fi
   if id "$JENKINS_USER" >/dev/null 2>&1; then
     run usermod -aG dialout "$JENKINS_USER"                 # only used if a board's serial port is attached here
     run install -m 0755 -o root -g root "$REPO/ci/hil/sentinel-deploy.sh" /usr/local/sbin/sentinel-deploy

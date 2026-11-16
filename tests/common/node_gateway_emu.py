@@ -33,7 +33,7 @@ def _topic_re(pattern):
 
 
 class NodeGatewayEmu:
-    def __init__(self, host, port, data_root, client_id=None):
+    def __init__(self, host, port, data_root, client_id=None, keep=0):
         self.data_root = os.path.abspath(data_root)
         self.started = time.time()
         index = json.load(open(os.path.join(SCHEMA_DIR, "index.json")))
@@ -46,6 +46,8 @@ class NodeGatewayEmu:
         self.schema_errors = []         # (topic, message)
         self.file_errors = []           # (path, problem)
         self.files = {}                 # path -> body of its "file ready" message
+        self.keep = keep                # >0: keep only the newest `keep` messages and file records (a long-running stub)
+        self.received = 0               # messages received in total (self.messages may be trimmed by `keep`)
         self.duplicates = 0
         self.seq_errors = []
         self._last_seq = {}
@@ -80,6 +82,11 @@ class NodeGatewayEmu:
         with self.lock:
             self.messages.append((msg.topic, body))
             self.arrived.append(time.time())
+            self.received += 1
+            if self.keep and len(self.messages) > self.keep:
+                drop = len(self.messages) - self.keep
+                del self.messages[:drop]
+                del self.arrived[:drop]
             if msg.retain:
                 self.retained[msg.topic] = body
             for e in errs:
@@ -109,6 +116,8 @@ class NodeGatewayEmu:
         problem = self.check_file(body)
         with self.lock:
             self.files[rel] = body
+            while self.keep and len(self.files) > self.keep:
+                self.files.pop(next(iter(self.files)))          # the oldest record (insertion order)
             if problem:
                 self.file_errors.append((rel, problem))
 
@@ -266,12 +275,14 @@ def main():
     ap.add_argument("--mqtt-port", type=int, default=1883)
     ap.add_argument("--data-root", required=True)
     ap.add_argument("--every", type=float, default=10, help="seconds between summaries")
+    ap.add_argument("--keep", type=int, default=0,
+                    help="keep only the newest N messages and file records (for a long-running stub; 0 = all)")
     ap.add_argument("--show", action="store_true", help="print every message as it arrives")
     ap.add_argument("--send", metavar="COMMAND", help="send one command (for example capture_image), print its result, exit")
     ap.add_argument("--device", help="device_id for --send, for example SN-00E04C0F5C9D")
     ap.add_argument("--args", default="{}", help="command fields as JSON, for example '{\"count\": 2}'")
     a = ap.parse_args()
-    gw = NodeGatewayEmu(a.mqtt_host, a.mqtt_port, a.data_root)
+    gw = NodeGatewayEmu(a.mqtt_host, a.mqtt_port, a.data_root, keep=a.keep)
     if a.send:
         if not a.device:
             ap.error("--send needs --device")
@@ -290,8 +301,9 @@ def main():
             time.sleep(0.5)
             if a.show:
                 with gw.lock:
-                    new = gw.messages[shown:]
-                    shown = len(gw.messages)
+                    total = gw.received                     # by count, not position: the list may be trimmed
+                    new = gw.messages[-(total - shown):] if total > shown else []
+                    shown = total
                 for t, b in new:
                     print(time.strftime("%H:%M:%S"), describe(t, b), flush=True)
             if time.time() >= next_summary:
